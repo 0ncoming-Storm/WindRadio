@@ -1,5 +1,7 @@
-/home/storm/Projects/WindRadio/client/build/sketch/client.ino.cpp.o: \
- /home/storm/Projects/WindRadio/client/build/sketch/client.ino.cpp \
+/home/storm/Projects/WindRadio/client/build/sketch/RadioManager.cpp.o: \
+ /home/storm/Projects/WindRadio/client/build/sketch/RadioManager.cpp \
+ /home/storm/Projects/WindRadio/client/build/sketch/RadioManager.h \
+ /home/storm/Projects/WindRadio/client/build/sketch/SystemData.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/Arduino.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/stdlib_noniso.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/RP2040Version.h \
@@ -135,8 +137,6 @@
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2040/hardware_regs/include/hardware/regs/uart.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/Bootsel.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2_common/pico_stdio/include/pico/stdio.h \
- /home/storm/Projects/WindRadio/client/build/sketch/RadioManager.h \
- /home/storm/Projects/WindRadio/client/build/sketch/SystemData.h \
  /home/storm/Projects/WindRadio/common/WindRadioCommon.h \
  /home/storm/Arduino/libraries/Adafruit_NeoPixel/Adafruit_NeoPixel.h \
  /home/storm/Arduino/libraries/Adafruit_NeoPixel/rp2040_pio.h \
@@ -154,13 +154,4 @@
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/api/../../../ArduinoCore-API/api/HardwareI2C.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2_common/hardware_i2c/include/hardware/i2c.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2040/hardware_structs/include/hardware/structs/i2c.h \
- /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2040/hardware_regs/include/hardware/regs/i2c.h \
- /home/storm/Projects/WindRadio/client/build/sketch/screen.h \
- /home/storm/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GFX.h \
- /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/Print.h \
- /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/cores/rp2040/api/Print.h \
- /home/storm/Arduino/libraries/Adafruit_GFX_Library/gfxfont.h \
- /home/storm/Arduino/libraries/Adafruit_BusIO/Adafruit_I2CDevice.h \
- /home/storm/Arduino/libraries/Adafruit_BusIO/Adafruit_SPIDevice.h \
- /home/storm/Arduino/libraries/Adafruit_SH110X/Adafruit_SH110X.h \
- /home/storm/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GrayOLED.h
+ /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2040/hardware_regs/include/hardware/regs/i2c.h

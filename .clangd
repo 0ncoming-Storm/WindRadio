@@ -1,0 +1,11 @@
+CompileFlags:
+  Compiler: /home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/bin/arm-none-eabi-g++
+  Add:
+    - "-target"
+    - "arm-none-eabi"
+    - "-isystem"
+    - "/home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include/c++/14.3.0/"
+    - "-isystem"
+    - "/home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include/c++/14.3.0/arm-none-eabi"
+    - "-isystem"
+    - "/home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include"
