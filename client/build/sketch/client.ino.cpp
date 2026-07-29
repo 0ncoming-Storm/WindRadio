@@ -2,6 +2,7 @@
 #line 1 "/home/storm/Projects/WindRadio/client/client.ino"
 #include "SerialUSB.h"
 #include "WindRadioCommon.h"
+#include "pico/mutex.h"
 #include <Adafruit_GFX.h>
 #include <Adafruit_SH110X.h>
 
@@ -36,9 +37,9 @@ private:
   }
 
 public:
-  static constexpr uint8_t BUTTON_A = 9;
+  static constexpr uint8_t BUTTON_A = 5;
   static constexpr uint8_t BUTTON_B = 6;
-  static constexpr uint8_t BUTTON_C = 5;
+  static constexpr uint8_t BUTTON_C = 9;
   MyDisplay() {} // constructor does nothing hardware-related
 
   void init() {
@@ -381,21 +382,29 @@ public:
   }
 
   uint8_t readButtonsDebounced(void) {
-    static uint8_t lastState = 0;
+    static uint8_t lastReading = 0; // raw reading from the previous call
+    static uint8_t stableState = 0; // debounced, held state
+    static uint8_t previousStable =
+        0; // stable state from the last call, for edge detection
     static unsigned long lastChangeTime = 0;
     const unsigned long debounceMs = 30;
 
-    uint8_t currentState = readButtons();
+    uint8_t currentReading = readButtons();
 
-    if (currentState != lastState) {
+    if (currentReading != lastReading) {
       lastChangeTime = millis();
+      lastReading = currentReading;
     }
 
     if ((millis() - lastChangeTime) > debounceMs) {
-      lastState = currentState;
+      stableState = currentReading;
     }
 
-    return lastState;
+    // Only report bits that just transitioned from 0 -> 1 (newly pressed)
+    uint8_t newlyPressed = stableState & ~previousStable;
+    previousStable = stableState;
+
+    return newlyPressed;
   }
 };
 
@@ -410,6 +419,62 @@ struct DeviceInfo {
 };
 
 enum DeviceID { DEVICE_GATE, DEVICE_POND, DEVICE_FOUNTAINS, DEVICE_COUNT };
+// ---- Settings, one per device. Core 0 writes via the menu; Core 1 will
+//      read these later to decide when to open/close things. ----
+struct DeviceSettings {
+  char name[12]; // char[] instead of String -- safe to share across cores
+  int windLimit;
+  int startHour, startMin, endHour, endMin;
+  DeviceMode mode;
+};
+
+DeviceSettings deviceSettingsG[DEVICE_COUNT] = {
+    {"Gate", 15, 16, 32, 23, 4, MODE_AUTO},
+    {"Pond", 10, 8, 0, 20, 0, MODE_OFF},
+    {"Fountain", 20, 9, 15, 21, 45, MODE_MANUAL_ON}};
+mutex_t deviceSettingsMutex;
+
+// ---- Live sensor/clock data. Core 1 will write these later; Core 0 (the
+//      InfoController) only ever reads them. ----
+struct CurrentConditions {
+  int windSpeed;
+  float temperature;
+  int hours;
+  int minutes;
+};
+
+CurrentConditions currentConditionsG = {23, 21.5, 14, 32}; // dummy defaults
+mutex_t currentConditionsMutex;
+
+// ---- Small helpers so callers never touch the mutexes directly ----
+#line 448 "/home/storm/Projects/WindRadio/client/client.ino"
+void getDeviceSettings(DeviceID id, DeviceSettings &out);
+#line 454 "/home/storm/Projects/WindRadio/client/client.ino"
+void setDeviceSettings(DeviceID id, const DeviceSettings &in);
+#line 460 "/home/storm/Projects/WindRadio/client/client.ino"
+void getCurrentConditions(CurrentConditions &out);
+#line 896 "/home/storm/Projects/WindRadio/client/client.ino"
+void setup();
+#line 909 "/home/storm/Projects/WindRadio/client/client.ino"
+void loop();
+#line 448 "/home/storm/Projects/WindRadio/client/client.ino"
+void getDeviceSettings(DeviceID id, DeviceSettings &out) {
+  mutex_enter_blocking(&deviceSettingsMutex);
+  out = deviceSettingsG[id];
+  mutex_exit(&deviceSettingsMutex);
+}
+
+void setDeviceSettings(DeviceID id, const DeviceSettings &in) {
+  mutex_enter_blocking(&deviceSettingsMutex);
+  deviceSettingsG[id] = in;
+  mutex_exit(&deviceSettingsMutex);
+}
+
+void getCurrentConditions(CurrentConditions &out) {
+  mutex_enter_blocking(&currentConditionsMutex);
+  out = currentConditionsG;
+  mutex_exit(&currentConditionsMutex);
+}
 
 enum InfoScreen { INFO_DEFAULT, INFO_SELECT_DEVICE, INFO_SHOW_DEVICE };
 
@@ -418,18 +483,6 @@ private:
   MyDisplay &display;
   InfoScreen screen = INFO_DEFAULT;
   DeviceID selectedDevice = DEVICE_GATE;
-
-  // -- Dummy data for now; real values will come from elsewhere later --
-  DeviceInfo devices[DEVICE_COUNT] = {
-      {"Gate", 15, "16:32", "23:04", MODE_AUTO},
-      {"Pond", 10, "08:00", "20:00", MODE_OFF},
-      {"Fountains", 20, "09:15", "21:45", MODE_MANUAL_ON}};
-
-  // -- Dummy values for the default info screen --
-  int dummyWindSpeed = 23;
-  float dummyTemp = 21.5;
-  int dummyHours = 14;
-  int dummyMinutes = 32;
 
 public:
   InfoController(MyDisplay &disp) : display(disp) {}
@@ -457,28 +510,37 @@ public:
       break;
 
     case INFO_SHOW_DEVICE:
-      screen = INFO_SELECT_DEVICE;
+      screen = INFO_DEFAULT; // any button returns straight to idle
       break;
     }
   }
 
   void render() {
     switch (screen) {
-    case INFO_DEFAULT:
-      display.showCurrentInformation(dummyWindSpeed, dummyTemp, dummyHours,
-                                     dummyMinutes);
+    case INFO_DEFAULT: {
+      CurrentConditions c;
+      getCurrentConditions(c);
+      display.showCurrentInformation(c.windSpeed, c.temperature, c.hours,
+                                     c.minutes);
       break;
+    }
 
     case INFO_SELECT_DEVICE:
       display.showStatusViewSelectonScreen();
       break;
 
     case INFO_SHOW_DEVICE: {
-      DeviceInfo &d = devices[selectedDevice];
+      DeviceSettings d;
+      getDeviceSettings(selectedDevice, d);
       bool onOrOff = (d.mode != MODE_OFF);
       bool manual = (d.mode == MODE_MANUAL_ON);
-      display.showTheIsValues(d.name, d.maxWind, d.startTime, d.endTime,
-                              onOrOff, manual);
+
+      char startBuf[6], endBuf[6];
+      sprintf(startBuf, "%02d:%02d", d.startHour, d.startMin);
+      sprintf(endBuf, "%02d:%02d", d.endHour, d.endMin);
+
+      display.showTheIsValues(String(d.name), d.windLimit, String(startBuf),
+                              String(endBuf), onOrOff, manual);
       break;
     }
     }
@@ -501,6 +563,8 @@ private:
 
   MenuScreen screen = MENU_SELECT_DEVICE;
   DeviceID selectedDevice = DEVICE_GATE;
+  DeviceSettings
+      editBuffer; // working copy of the device currently being edited
 
   int listSelection = 0; // shared by all showSettingsMenu-based screens
   int editTarget = 1;    // shared by the two edit screens
@@ -511,19 +575,6 @@ private:
   bool blinkVisible = true;
   unsigned long lastBlinkToggle = 0;
   const unsigned long blinkIntervalMs = 400;
-
-  // -- Dummy per-device settings data --
-  struct DeviceSettings {
-    String name;
-    int windLimit;
-    int startHour, startMin, endHour, endMin;
-    DeviceMode mode;
-  };
-
-  DeviceSettings devices[DEVICE_COUNT] = {
-      {"Gate", 15, 16, 32, 23, 4, MODE_AUTO},
-      {"Pond", 10, 8, 0, 20, 0, MODE_OFF},
-      {"Fountains", 20, 9, 15, 21, 45, MODE_MANUAL_ON}};
 
   // -- Option label arrays, kept as members so pointers stay valid --
   String deviceListOptions[4] = {"Gate", "Pond", "Fountains", "Back"};
@@ -550,10 +601,11 @@ public:
     switch (screen) {
     case MENU_SELECT_DEVICE:
       if (navigateList(buttons, 4)) {
-        if (listSelection == 3) { // Back
+        if (listSelection == 3) {
           exitRequested = true;
         } else {
           selectedDevice = (DeviceID)listSelection;
+          getDeviceSettings(selectedDevice, editBuffer); // load working copy
           screen = MENU_DEVICE_OPTIONS;
           listSelection = 0;
         }
@@ -575,7 +627,7 @@ public:
           break;
         case 2: // Mode
           screen = MENU_MODE_SELECT;
-          listSelection = (int)devices[selectedDevice].mode;
+          listSelection = (int)editBuffer.mode;
           break;
         case 3: // Back
           screen = MENU_SELECT_DEVICE;
@@ -588,7 +640,8 @@ public:
     case MENU_MODE_SELECT:
       if (navigateList(buttons, 4)) {
         if (listSelection != 3) { // not Back
-          devices[selectedDevice].mode = (DeviceMode)listSelection;
+          editBuffer.mode = (DeviceMode)listSelection;
+          setDeviceSettings(selectedDevice, editBuffer); // commit
         }
         screen = MENU_DEVICE_OPTIONS;
         listSelection = 2; // land back on "Mode" row
@@ -621,19 +674,16 @@ public:
       display.showSettingsMenu(modeSelectOptions, 4, listSelection);
       break;
 
-    case MENU_EDIT_WIND: {
-      DeviceSettings &d = devices[selectedDevice];
-      display.showIntKmhSetting(d.name, d.windLimit, currentBlinkTarget());
+    case MENU_EDIT_WIND:
+      display.showIntKmhSetting(String(editBuffer.name), editBuffer.windLimit,
+                                currentBlinkTarget());
       break;
-    }
 
-    case MENU_EDIT_SCHEDULE: {
-      DeviceSettings &d = devices[selectedDevice];
-      display.showTimeIntervalSetting(d.name, d.startHour, d.startMin,
-                                      d.endHour, d.endMin,
-                                      currentBlinkTarget());
+    case MENU_EDIT_SCHEDULE:
+      display.showTimeIntervalSetting(
+          String(editBuffer.name), editBuffer.startHour, editBuffer.startMin,
+          editBuffer.endHour, editBuffer.endMin, currentBlinkTarget());
       break;
-    }
     }
   }
 
@@ -653,15 +703,14 @@ private:
 
   // Wind Limit edit screen. Targets: 1 = value, 2 = back.
   void handleWindEditInput(uint8_t buttons) {
-    DeviceSettings &d = devices[selectedDevice];
-
     if (isEditingField) {
-      if (buttons & 0x1) { // A: decrement
-        d.windLimit = max(0, d.windLimit - 1);
-      } else if (buttons & 0x4) { // C: increment
-        d.windLimit = min(99, d.windLimit + 1);
+      if (buttons & 0x4) { // A: decrement
+        editBuffer.windLimit = max(0, editBuffer.windLimit - 1);
+      } else if (buttons & 0x1) { // C: increment
+        editBuffer.windLimit = min(99, editBuffer.windLimit + 1);
       } else if (buttons & 0x2) { // B: confirm, stop editing
         isEditingField = false;
+        setDeviceSettings(selectedDevice, editBuffer); // commit
       }
       return;
     }
@@ -681,32 +730,31 @@ private:
   // Schedule edit screen. Targets: 1=startHour, 2=startMin, 3=endHour,
   // 4=endMin, 5=back.
   void handleScheduleEditInput(uint8_t buttons) {
-    DeviceSettings &d = devices[selectedDevice];
-
     if (isEditingField) {
       int delta = 0;
-      if (buttons & 0x1)
+      if (buttons & 0x4)
         delta = -1;
-      else if (buttons & 0x4)
+      else if (buttons & 0x1)
         delta = 1;
       else if (buttons & 0x2) { // B: confirm, stop editing
         isEditingField = false;
+        setDeviceSettings(selectedDevice, editBuffer); // commit
         return;
       }
 
       if (delta != 0) {
         switch (editTarget) {
         case 1:
-          d.startHour = (d.startHour + delta + 24) % 24;
+          editBuffer.startHour = (editBuffer.startHour + delta + 24) % 24;
           break;
         case 2:
-          d.startMin = (d.startMin + delta + 60) % 60;
+          editBuffer.startMin = (editBuffer.startMin + delta + 60) % 60;
           break;
         case 3:
-          d.endHour = (d.endHour + delta + 24) % 24;
+          editBuffer.endHour = (editBuffer.endHour + delta + 24) % 24;
           break;
         case 4:
-          d.endMin = (d.endMin + delta + 60) % 60;
+          editBuffer.endMin = (editBuffer.endMin + delta + 60) % 60;
           break;
         }
       }
@@ -858,12 +906,9 @@ private:
 
 App app;
 
-#line 859 "/home/storm/Projects/WindRadio/client/client.ino"
-void setup();
-#line 870 "/home/storm/Projects/WindRadio/client/client.ino"
-void loop();
-#line 859 "/home/storm/Projects/WindRadio/client/client.ino"
 void setup() {
+  mutex_init(&deviceSettingsMutex);
+  mutex_init(&currentConditionsMutex);
   Serial.begin(115200);
   radioSetup(MYNODEID);
   Serial.println("Node " + String(MYNODEID) + " up.");
@@ -874,8 +919,5 @@ void setup() {
   app.init();
 }
 
-void loop() {
-  app.loop();
-  blinkNeoPixel(0, 255, 255, 200, 1);
-}
+void loop() { app.loop(); }
 

@@ -1,55 +1,47 @@
 #pragma once
-#include <Adafruit_NeoPixel.h>
-#include <RFM69.h>
-#include <SPI.h>
-#include <Wire.h>
+#include <Arduino.h>
 
-// Shared pin defs
-#define RFM69_CS PIN_RFM_CS
-#define RFM69_INT PIN_RFM_DIO0
-#define RFM69_RST PIN_RFM_RST
-#define NEOPIXEL_PIN 4
-#define NUM_PIXELS 1
+#define PROTOCOL_VERSION 1
 
-// Shared radio config
-#define NETWORKID 100
-#define FREQUENCY RF69_915MHZ
-#define ENCRYPTKEY "WindRadio"
-#define IS_RFM69HW_HCW
-// Shared objects (defined in the .cpp, declared extern here)
-extern RFM69 radio;
-extern Adafruit_NeoPixel strip;
+// Physical node addresses
+#define NODE_MAIN 1
+#define NODE_POND 2
+#define NODE_GATE 3
+#define NODE_FOUNTAIN1 4
+#define NODE_FOUNTAIN2 5
 
-// Shared stucts
-#pragma once
-#include <stdint.h>
-
-// --- Boolean flag bit positions ---
-#define GATE_STATUS (1 << 0)
-#define LARGE_FOUNTAIN_STATUS (1 << 1)
-#define SMALL_FOUNTAIN_STATUS (1 << 2)
-#define TRIGGER_GATE_NOW (1 << 3)
-
-// add more as needed, up to 16 flags in a uint16_t (32 if you use uint32_t)
-
-#pragma pack(push, 1)
-struct WindRadioPacket {
-  uint32_t timestamp;  // Unix time from RTC (or 0 / millis-based if no RTC)
-  uint16_t wind_speed; // your primary integer payload
-  uint16_t flags;      // bitmask of up to 16 booleans
-  float temperature;   // example of an arbitrary float field
-  uint8_t nodeId;      // optional: sender ID, useful with multiple nodes
+enum PacketType : uint8_t {
+  PKT_POLL_REQUEST,
+  PKT_POND_STATUS,
+  PKT_RELAY_STATUS,
+  PKT_SET_RELAY,
+  PKT_SET_POND,
 };
-#pragma pack(pop)
 
-// Shared functions
-void blinkNeoPixel(uint8_t red, uint8_t green, uint8_t blue, uint16_t delay_ms,
-                   uint8_t blinks);
-void radioSetup(uint8_t myNodeId);
+struct WindRadioPacket {
+  uint8_t version = PROTOCOL_VERSION;
+  PacketType type;
 
-// Radio packet helpers
-bool sendPacket(uint8_t toNodeId, const WindRadioPacket &pkt);
-bool receivePacket(WindRadioPacket &outPkt);
+  union {
+    struct { // PKT_POND_STATUS
+      uint8_t hours;
+      uint8_t minutes;
+      int windSpeed;
+      bool relayOn;
+    } pondStatus;
 
-// String helpers
-String to_upper(String str);
+    struct { // PKT_RELAY_STATUS
+      uint8_t nodeId;
+      bool relayOn;
+    } relayStatus;
+
+    struct { // PKT_SET_RELAY / PKT_SET_POND (same shape, reused)
+      bool relayOn;
+    } setRelay;
+  };
+};
+
+// Assuming these are defined in your underlying radio .cpp file
+extern void radioSetup(uint8_t nodeId);
+extern bool sendPacket(uint8_t destNodeId, const WindRadioPacket &packet);
+extern bool receivePacket(WindRadioPacket &outPacket);

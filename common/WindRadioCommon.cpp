@@ -89,10 +89,3 @@ bool receivePacket(WindRadioPacket &outPkt) {
 
   return true;
 }
-
-String to_upper(String str) {
-  for (auto &c : str) {
-    c = static_cast<char>(toupper(static_cast<unsigned char>(c)));
-  }
-  return str;
-}
