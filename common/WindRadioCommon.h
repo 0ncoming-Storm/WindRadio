@@ -20,8 +20,6 @@
 #define RFM69_CS PIN_RFM_CS
 #define RFM69_INT PIN_RFM_DIO0
 #define RFM69_RST PIN_RFM_RST
-#define NEOPIXEL_PIN 4
-#define NUM_PIXELS 1
 
 // --- Shared Radio Config ---
 #define NETWORKID 100
@@ -69,8 +67,7 @@ extern RFM69 radio;
 extern Adafruit_NeoPixel strip;
 
 // --- Shared Function Prototypes ---
-void blinkNeoPixel(uint8_t red, uint8_t green, uint8_t blue, uint16_t delay_ms,
-                   uint8_t blinks);
+
 void radioSetup(uint8_t myNodeId);
 bool sendPacket(uint8_t toNodeId, const WindRadioPacket &pkt);
 bool receivePacket(WindRadioPacket &outPkt);

@@ -32,12 +32,8 @@ void getCurrentConditions(CurrentConditions &out);
 void updateConditionsFromPond(int windSpeed, int hours, int minutes);
 #line 55 "/home/storm/Projects/WindRadio/client/client.ino"
 void setup();
-#line 76 "/home/storm/Projects/WindRadio/client/client.ino"
+#line 79 "/home/storm/Projects/WindRadio/client/client.ino"
 void loop();
-#line 81 "/home/storm/Projects/WindRadio/client/client.ino"
-void setup1();
-#line 86 "/home/storm/Projects/WindRadio/client/client.ino"
-void loop1();
 #line 23 "/home/storm/Projects/WindRadio/client/client.ino"
 void getDeviceSettings(DeviceID id, DeviceSettings &out) {
   mutex_enter_blocking(&deviceSettingsMutex);
@@ -72,16 +68,19 @@ RadioManager radioManager;
 
 // ================= CORE 0 (Display & Base Setup) =================
 void setup() {
+
   mutex_init(&deviceSettingsMutex);
   mutex_init(&currentConditionsMutex);
   radioManager.init(); // Initializes radio manager mutexes internally
 
-  Serial.begin(115200);
-  radioSetup(MYNODEID);
-  Serial.println("Node " + String(MYNODEID) + " up.");
+  // Serial.begin(115200);
+  // while (!Serial) {
+  //   ; // Do nothing, just loop
+  // }
+  // radioSetup(MYNODEID);
+  // Serial.println("Node " + String(MYNODEID) + " up.");
 
-  blinkNeoPixel(0, 0, 255, 100, 1);
-  Serial.println("Feather RP2040 Radio Initialized successfully.");
+  // Serial.println("Feather RP2040 Radio Initialized successfully.");
 
   delay(250); // Wait for the OLED to power up
 
@@ -89,23 +88,24 @@ void setup() {
 
   // Core 0 is finished initializing. Safe for Core 1 to start using
   // hardware/mutexes.
-  core0ReadyG = true;
+  // core0ReadyG = true;
 }
 
 void loop() {
   app.loop(); // Handle UI and Display
 }
 
-// ================= CORE 1 (Radio Polling & Logic) =================
-void setup1() {
-  // Wait here passively; actual initialization tied to hardware happens in Core
-  // 0's setup()
-}
-
-void loop1() {
-  if (!core0ReadyG)
-    return; // Prevent executing before core 0 completes setup
-
-  radioManager.loop(); // Process background radio tasks and dispatch logic
-}
+// // ================= CORE 1 (Radio Polling & Logic) =================
+// void setup1() {
+//   // Wait here passively; actual initialization tied to hardware happens in
+//   Core
+//   // 0's setup()
+// }
+//
+// void loop1() {
+//   if (!core0ReadyG)
+//     return; // Prevent executing before core 0 completes setup
+//
+//   radioManager.loop(); // Process background radio tasks and dispatch logic
+// }
 

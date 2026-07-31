@@ -183,6 +183,7 @@ void RadioManager::decideAndSendCommands() {
 }
 
 void RadioManager::runPollCycle() {
+  Serial.println("starting poll cycle");
   pollPondNode();
   pollRelayNode(NODE_GATE, gateStatus);
   pollRelayNode(NODE_FOUNTAIN1, fountain1Status);

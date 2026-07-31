@@ -8,23 +8,15 @@ static String to_upper(String str) {
 }
 
 // ==========================================
-// MyDisplay Implementation
+// MyButtons Implementation
 // ==========================================
-MyDisplay::MyDisplay() {}
 
-void MyDisplay::init() {
-  display.begin(0x3C, true);
-  display.clearDisplay();
-  display.display();
-  display.setRotation(3);
+MyButtons::MyButtons() {
   pinMode(BUTTON_A, INPUT_PULLUP);
   pinMode(BUTTON_B, INPUT_PULLUP);
   pinMode(BUTTON_C, INPUT_PULLUP);
-  display.setTextSize(1);
-  display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 }
-
-uint8_t MyDisplay::readButtons(void) {
+uint8_t MyButtons::readButtons(void) {
   uint8_t buttons = 0;
   if (digitalRead(BUTTON_A) == 0)
     buttons |= 0x1;
@@ -35,12 +27,12 @@ uint8_t MyDisplay::readButtons(void) {
   return buttons;
 }
 
-uint8_t MyDisplay::readButtonsDebounced(void) {
+uint8_t MyButtons::readButtonsOnClick(void) {
   static uint8_t lastReading = 0;
   static uint8_t stableState = 0;
   static uint8_t previousStable = 0;
   static unsigned long lastChangeTime = 0;
-  const unsigned long debounceMs = 30;
+  const unsigned long debounceMs = 25;
 
   uint8_t currentReading = readButtons();
   if (currentReading != lastReading) {
@@ -54,7 +46,20 @@ uint8_t MyDisplay::readButtonsDebounced(void) {
   previousStable = stableState;
   return newlyPressed;
 }
+// ==========================================
+// MyDisplay Implementation
+// ==========================================
 
+MyDisplay::MyDisplay() {}
+
+void MyDisplay::init() {
+  display.begin(0x3C, true);
+  display.clearDisplay();
+  display.display();
+  display.setRotation(3);
+  display.setTextSize(1);
+  display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+}
 void MyDisplay::showCurrentInformation(int windSpeed, float tempriture,
                                        int hours, int minuits) {
   display.clearDisplay();
@@ -571,12 +576,15 @@ App::App() : infoController(display), menuController(display) {}
 void App::init() { display.init(); }
 
 void App::loop() {
-  uint8_t buttons = display.readButtonsDebounced();
+  uint8_t buttons = button.readButtonsOnClick();
   if (buttons != 0)
-    lastInputTime = millis();
+    lastInputTime = millis(); // time at button pressed
 
   handleModeEntry(buttons);
 
+  // if there is no input for longer then the timeout
+  // (e.g. 8000ms, equivalent to 8 seconds) then return
+  // to initial screen
   if (currentMode == MODE_INFO && (millis() - lastInputTime > infoTimeoutMs)) {
     infoController.resetToDefault();
   }
@@ -589,6 +597,7 @@ void App::loop() {
     menuController.render();
     break;
   }
+  delay(10);
 }
 
 void App::handleModeEntry(uint8_t buttons) {
@@ -604,23 +613,29 @@ void App::handleModeEntry(uint8_t buttons) {
   if (buttons == 0 && pendingButtons == 0)
     return;
 
-  uint8_t finalCombo = pendingButtons | buttons;
+  uint8_t buttonCombination = pendingButtons | buttons;
   pendingButtons = 0;
-  if (finalCombo == 0)
+  if (buttonCombination == 0)
     return;
 
-  if (finalCombo == 0x3) {
+  if (buttonCombination == 0b011) {
     currentMode = MODE_MENU;
     menuController.reset();
     return;
   }
 
-  if (currentMode == MODE_INFO) {
-    infoController.handleInput(finalCombo);
-  } else if (currentMode == MODE_MENU) {
-    menuController.handleInput(finalCombo);
+  switch (currentMode) {
+  // defult view: info about CURRENT CONDITIONS, SELECT VIEW, DEVICE STATUS
+  case MODE_INFO:
+    infoController.handleInput(buttonCombination);
+    break;
+
+  // SETTINGS menu
+  case MODE_MENU:
+    menuController.handleInput(buttonCombination);
     if (menuController.wantsExit()) {
       currentMode = MODE_INFO;
     }
+    break;
   }
 }

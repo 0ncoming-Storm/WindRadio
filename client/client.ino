@@ -16,7 +16,7 @@ DeviceSettings deviceSettingsG[DEVICE_COUNT] = {
     {"Fountain", 20, 9, 15, 21, 45, MODE_AUTO}};
 mutex_t deviceSettingsMutex;
 
-CurrentConditions currentConditionsG = {23, 21.5, 14, 32}; // dummy defaults
+CurrentConditions currentConditionsG = {99, 21.5, 14, 32}; // dummy defaults
 mutex_t currentConditionsMutex;
 
 // ---- Thread-Safe Data Accessors ----
@@ -53,17 +53,16 @@ RadioManager radioManager;
 
 // ================= CORE 0 (Display & Base Setup) =================
 void setup() {
+
   mutex_init(&deviceSettingsMutex);
   mutex_init(&currentConditionsMutex);
   radioManager.init(); // Initializes radio manager mutexes internally
 
   Serial.begin(115200);
+  // while (!Serial) {
+  //   ; // Do nothing, just loop
+  // }
   radioSetup(MYNODEID);
-  Serial.println("Node " + String(MYNODEID) + " up.");
-
-  blinkNeoPixel(0, 0, 255, 100, 1);
-  Serial.println("Feather RP2040 Radio Initialized successfully.");
-
   delay(250); // Wait for the OLED to power up
 
   app.init();
@@ -79,8 +78,8 @@ void loop() {
 
 // ================= CORE 1 (Radio Polling & Logic) =================
 void setup1() {
-  // Wait here passively; actual initialization tied to hardware happens in Core
-  // 0's setup()
+  // Wait here passively; actual initialization tied to hardware happens in
+  // Core0's setup()
 }
 
 void loop1() {

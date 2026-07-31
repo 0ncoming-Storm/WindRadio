@@ -6,16 +6,23 @@
 #include <Arduino.h>
 #include <Wire.h>
 
-class MyDisplay {
+class MyButtons {
 private:
-  Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
-  uint8_t readButtons(void);
-
-public:
   static constexpr uint8_t BUTTON_A = 5;
   static constexpr uint8_t BUTTON_B = 6;
   static constexpr uint8_t BUTTON_C = 9;
+  uint8_t readButtons(void);
 
+public:
+  MyButtons();
+  uint8_t readButtonsOnClick(void);
+};
+
+class MyDisplay {
+private:
+  Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
+
+public:
   MyDisplay();
   void init();
   void showCurrentInformation(int windSpeed, float tempriture, int hours,
@@ -28,7 +35,6 @@ public:
   void showIntKmhSetting(String label, int value, int highlightTarget);
   void showTimeIntervalSetting(String label, int startHour, int startMin,
                                int endHour, int endMin, int highlightTarget);
-  uint8_t readButtonsDebounced(void);
 };
 
 enum InfoScreen { INFO_DEFAULT, INFO_SELECT_DEVICE, INFO_SHOW_DEVICE };
@@ -93,6 +99,8 @@ enum AppMode { MODE_INFO, MODE_MENU };
 class App {
 private:
   MyDisplay display;
+  MyButtons button;
+
   InfoController infoController;
   MenuController menuController;
   AppMode currentMode = MODE_INFO;
