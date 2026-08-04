@@ -158,4 +158,9 @@
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0/libraries/SPI/src/SPIHelper.h \
  /home/storm/.arduino15/packages/rp2040/hardware/rp2040/5.7.0//pico-sdk/src/rp2040/hardware_structs/include/hardware/structs/iobank0.h \
  /home/storm/Arduino/libraries/Adafruit_SH110X/Adafruit_SH110X.h \
- /home/storm/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GrayOLED.h
+ /home/storm/Arduino/libraries/Adafruit_GFX_Library/Adafruit_GrayOLED.h \
+ /home/storm/Projects/WindRadio/client/build/sketch/RadioManager.h \
+ /home/storm/Projects/WindRadio/common/WindRadioCommon.h \
+ /home/storm/Arduino/libraries/Adafruit_NeoPixel/Adafruit_NeoPixel.h \
+ /home/storm/Arduino/libraries/Adafruit_NeoPixel/rp2040_pio.h \
+ /home/storm/Arduino/libraries/RFM69_LowPowerLab/RFM69.h

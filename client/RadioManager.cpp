@@ -1,16 +1,21 @@
 #include "RadioManager.h"
+#include "SystemData.h"
+
+// RadioManager.cpp — Core 1 thread for polling remote nodes and controlling
+// relays.
 
 void RadioManager::init() {
   mutex_init(&nodeStatusMutex);
 
-  // Initialize structs with safe defaults
-  pondStatus = {0, 0, 0, false, 0, NODE_OK, 0};
+  // Initialize cached status structs with safe defaults
+  pondStatus = {0, 0, 0, 0.0, false, 0, NODE_OK, 0};
   gateStatus = {false, 0, NODE_OK, 0};
   fountain1Status = {false, 0, NODE_OK, 0};
   fountain2Status = {false, 0, NODE_OK, 0};
 }
 
 void RadioManager::loop() {
+  // Run a full poll cycle every POLL_CYCLE_MS
   if (millis() - lastPollCycle >= POLL_CYCLE_MS) {
     lastPollCycle = millis();
     runPollCycle();
@@ -35,40 +40,45 @@ void RadioManager::getFountainStatus(uint8_t index, NodeStatus &out) {
   mutex_exit(&nodeStatusMutex);
 }
 
+// Poll a single node and return its response packet. Returns false on timeout.
 bool RadioManager::pollNode(uint8_t nodeId, WindRadioPacket &outResponse,
                             unsigned long timeoutMs) {
-  WindRadioPacket req;
-  req.type = PKT_POLL_REQUEST;
+  WindRadioPacket requestPacket;
+  requestPacket.type = PKT_POLL_REQUEST;
 
-  if (!sendPacket(nodeId, req)) {
+  if (!sendPacket(nodeId, requestPacket)) {
     return false;
   }
 
   unsigned long start = millis();
   while (millis() - start < timeoutMs) {
-    WindRadioPacket incoming;
-    if (receivePacket(incoming)) {
-      if (incoming.version != PROTOCOL_VERSION) {
-        continue;
+    WindRadioPacket incomingPacket;
+    if (receivePacket(incomingPacket)) {
+      if (incomingPacket.version != PROTOCOL_VERSION) {
+        continue; // ignore outdated protocol versions
       }
-      outResponse = incoming;
+      outResponse = incomingPacket;
       return true;
     }
   }
   return false;
 }
 
+// Poll the pond node for wind data + pump relay status, then feed the
+// wind conditions into the shared CurrentConditions struct.
 void RadioManager::pollPondNode() {
-  WindRadioPacket response;
-  bool ok = pollNode(NODE_POND, response, POLL_TIMEOUT_MS) &&
-            response.type == PKT_POND_STATUS;
+  WindRadioPacket responsePacket;
+  CurrentConditions receivedCurrentConditions;
+  bool ok = pollNode(NODE_POND, responsePacket, POLL_TIMEOUT_MS) &&
+            responsePacket.type == PKT_POND_STATUS;
 
   mutex_enter_blocking(&nodeStatusMutex);
   if (ok) {
-    pondStatus.hours = response.pondStatus.hours;
-    pondStatus.minutes = response.pondStatus.minutes;
-    pondStatus.windSpeed = response.pondStatus.windSpeed;
-    pondStatus.relayOn = response.pondStatus.relayOn;
+    pondStatus.hours = responsePacket.pondStatus.hours;
+    pondStatus.minutes = responsePacket.pondStatus.minutes;
+    pondStatus.windSpeed = responsePacket.pondStatus.windSpeed;
+    pondStatus.temperature = responsePacket.pondStatus.temperature;
+    pondStatus.relayOn = responsePacket.pondStatus.relayOn;
     pondStatus.missedPolls = 0;
     pondStatus.error = NODE_OK;
     pondStatus.lastSuccessMs = millis();
@@ -81,12 +91,14 @@ void RadioManager::pollPondNode() {
   mutex_exit(&nodeStatusMutex);
 
   if (ok) {
-    updateConditionsFromPond(response.pondStatus.windSpeed,
-                             response.pondStatus.hours,
-                             response.pondStatus.minutes);
+    updateConditionsFromPond(responsePacket.pondStatus.windSpeed,
+                             responsePacket.pondStatus.temperature,
+                             responsePacket.pondStatus.hours,
+                             responsePacket.pondStatus.minutes);
   }
 }
 
+// Poll a relay (gate or fountain) node for on/off status + error tracking.
 void RadioManager::pollRelayNode(uint8_t nodeId, NodeStatus &status) {
   WindRadioPacket response;
   bool ok = pollNode(nodeId, response, POLL_TIMEOUT_MS) &&
@@ -107,6 +119,8 @@ void RadioManager::pollRelayNode(uint8_t nodeId, NodeStatus &status) {
   mutex_exit(&nodeStatusMutex);
 }
 
+// Check whether the given hour/minute falls within the device's schedule.
+// Handles overnight windows (e.g. 22:00 → 06:00).
 bool RadioManager::isWithinSchedule(int hours, int minutes,
                                     const DeviceSettings &s) {
   int nowMin = hours * 60 + minutes;
@@ -116,26 +130,32 @@ bool RadioManager::isWithinSchedule(int hours, int minutes,
   if (startMin <= endMin) {
     return nowMin >= startMin && nowMin < endMin;
   } else {
+    // Window wraps past midnight
     return nowMin >= startMin || nowMin < endMin;
   }
 }
 
-bool RadioManager::computeDesiredState(const DeviceSettings &s, bool windStale,
-                                       int windSpeed, int hours, int minutes) {
+// Decide whether a device's relay should be on, given mode + conditions.
+// Returns false if wind data is stale (no recent pond reading).
+bool RadioManager::computeDesiredState(const DeviceSettings &settingsStruct,
+                                       bool windStale, int windSpeed, int hours,
+                                       int minutes) {
   if (windStale)
     return false;
 
-  switch (s.mode) {
+  switch (settingsStruct.mode) {
   case MODE_OFF:
     return false;
   case MODE_MANUAL_ON:
     return true;
   case MODE_AUTO:
   default:
-    return isWithinSchedule(hours, minutes, s) && windSpeed <= s.windLimit;
+    return isWithinSchedule(hours, minutes, settingsStruct) &&
+           windSpeed <= settingsStruct.windLimit;
   }
 }
 
+// Send a relay on/off command to a remote node.
 void RadioManager::sendRelayCommand(uint8_t nodeId, PacketType type,
                                     bool relayOn) {
   WindRadioPacket cmd;
@@ -144,6 +164,8 @@ void RadioManager::sendRelayCommand(uint8_t nodeId, PacketType type,
   sendPacket(nodeId, cmd);
 }
 
+// Core decision loop: compare desired vs. actual relay states and send
+// commands only when a change is needed.
 void RadioManager::decideAndSendCommands() {
   DeviceSettings gateSettings, pondSettings, fountainSettings;
   getDeviceSettings(DEVICE_GATE, gateSettings);
@@ -168,6 +190,7 @@ void RadioManager::decideAndSendCommands() {
   bool fountainDesired = computeDesiredState(fountainSettings, windStale,
                                              windSpeed, hours, minutes);
 
+  // Only send commands when the desired state differs from reality
   if (gateDesired != gateLastKnown) {
     sendRelayCommand(NODE_GATE, PKT_SET_RELAY, gateDesired);
   }
@@ -182,6 +205,7 @@ void RadioManager::decideAndSendCommands() {
   }
 }
 
+// Full poll cycle: poll pond + all relay nodes, then decide on commands.
 void RadioManager::runPollCycle() {
   Serial.println("starting poll cycle");
   pollPondNode();

@@ -18,8 +18,6 @@ ifeq ($(PORT),)
 PORT := /dev/ttyACM0
 endif
 
-
-
 # All source files that should trigger a recompile when changed
 SOURCES := $(wildcard $(node)/*.ino $(node)/*.c $(node)/*.cpp $(node)/*.h $(node)/*.hpp common/*.c common/*.cpp common/*.h common/*.hpp)
 
@@ -30,17 +28,19 @@ all: compile
 # Compiles only if sources changed since last successful build
 compile: $(STAMP)
 
-
 LIBFLAGS = --library $(CURDIR)/common
+
+# Optimization overrides to inject -O3 flag
+O3_FLAGS = --build-property "compiler.c.extra_flags=-O3" --build-property "compiler.cpp.extra_flags=-O3"
 
 $(STAMP): $(SOURCES)
 	@if [ ! -d "$(node)" ] || [ ! -f "$(SKETCH)" ]; then \
 		echo "ERROR: Target directory or sketch file '$(SKETCH)' does not exist!"; \
 		exit 1; \
 	fi
-	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) --only-compilation-database $(SKETCH)
+	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(O3_FLAGS) --only-compilation-database $(SKETCH)
 	@cp $(BUILD_DIR)/compile_commands.json .
-	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(SKETCH)
+	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(O3_FLAGS) $(SKETCH)
 	@touch $(STAMP)
 
 # Force a recompile regardless of timestamps

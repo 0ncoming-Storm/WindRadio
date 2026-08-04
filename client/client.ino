@@ -1,3 +1,17 @@
+/*
+ * client.ino — WindRadio base station (front panel + display + radio).
+ *
+ * Runs on a Feather RP2040 with dual-core support:
+ *   Core 0: UI / display / button handling via App class.
+ *   Core 1: background radio polling via RadioManager.
+ *
+ * Wiring:
+ *   Buttons: A=GPIO5, B=GPIO6, C=GPIO9 (INPUT_PULLUP)
+ *   OLED:    SH1107 on I2C (addr 0x3C)
+ *   Radio:   RFM69HW on SPI (CS=RFM69_CS, INT=RFM69_INT, RST=RFM69_RST)
+ *   NeoPixel: status LED on GPIO4
+ */
+
 #include "RadioManager.h"
 #include "SerialUSB.h"
 #include "SystemData.h"
@@ -5,11 +19,11 @@
 #include "pico/mutex.h"
 #include "screen.h"
 
-#define MYNODEID 1 // Node 1 (Main Node)
-
 // ---- Global State & Mutexes ----
 volatile bool core0ReadyG = false; // Synchronizes Core 1 startup
 
+// Default device settings: {name, windLimit, startHr, startMin, endHr, endMin,
+// mode}
 DeviceSettings deviceSettingsG[DEVICE_COUNT] = {
     {"Gate", 15, 16, 32, 23, 4, MODE_AUTO},
     {"Pond", 10, 8, 0, 20, 0, MODE_AUTO},
@@ -38,9 +52,11 @@ void getCurrentConditions(CurrentConditions &out) {
   mutex_exit(&currentConditionsMutex);
 }
 
-void updateConditionsFromPond(int windSpeed, int hours, int minutes) {
+void updateConditionsFromPond(int windSpeed, float temperature, int hours,
+                              int minutes) {
   mutex_enter_blocking(&currentConditionsMutex);
   currentConditionsG.windSpeed = windSpeed;
+  currentConditionsG.temperature = temperature;
   currentConditionsG.hours = hours;
   currentConditionsG.minutes = minutes;
   // temperature untouched -- no sensor for it yet
@@ -53,18 +69,17 @@ RadioManager radioManager;
 
 // ================= CORE 0 (Display & Base Setup) =================
 void setup() {
-
   mutex_init(&deviceSettingsMutex);
   mutex_init(&currentConditionsMutex);
   radioManager.init(); // Initializes radio manager mutexes internally
-
   Serial.begin(115200);
   // while (!Serial) {
   //   ; // Do nothing, just loop
   // }
-  radioSetup(MYNODEID);
+  radioSetup(NODE_MAIN);
+  Wire.begin();
+  Wire.setClock(400000);
   delay(250); // Wait for the OLED to power up
-
   app.init();
 
   // Core 0 is finished initializing. Safe for Core 1 to start using
