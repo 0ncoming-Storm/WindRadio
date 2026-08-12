@@ -57,6 +57,9 @@ bool RadioManager::pollNode(uint8_t nodeId, WindRadioPacket &outResponse,
       if (incomingPacket.version != PROTOCOL_VERSION) {
         continue; // ignore outdated protocol versions
       }
+      if (incomingPacket.fromNode != nodeId) {
+        continue; // ignore packets from a different node
+      }
       outResponse = incomingPacket;
       return true;
     }

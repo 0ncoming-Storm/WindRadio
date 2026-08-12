@@ -9,7 +9,7 @@
 enum DeviceMode { MODE_OFF, MODE_AUTO, MODE_MANUAL_ON };
 enum DeviceID { DEVICE_GATE, DEVICE_POND, DEVICE_FOUNTAINS, DEVICE_COUNT };
 
-// Per-device settings: persisted in EEPROM on the base station.
+// Per-device settings. RAM only: changes are lost on reboot.
 struct DeviceSettings {
   char name[12];
   int windLimit;               // max wind speed (KM/H) before auto-shutoff

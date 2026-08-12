@@ -11,7 +11,7 @@
 // hardware pin mappings, and the fixed-size packet structure.
 
 // --- Protocol Version ---
-#define PROTOCOL_VERSION 1
+#define PROTOCOL_VERSION 2
 
 // --- Physical Node Addresses ---
 #define NODE_MAIN 1
@@ -48,6 +48,7 @@ enum PacketType : uint8_t {
 struct WindRadioPacket {
   uint8_t version = PROTOCOL_VERSION;
   PacketType type;
+  uint8_t fromNode = 0; // node ID of the packet's sender (stamped on receive)
 
   union {
     struct { // PKT_POND_STATUS

@@ -1,10 +1,10 @@
 #line 1 "/home/storm/Projects/WindRadio/client/screen.cpp"
 #include "screen.h"
+
 #include "RadioManager.h"
 #include "SystemData.h"
 #include "api/String.h"
 
-// Helper: convert a String to uppercase for UI headers.
 static String to_upper(String str) {
   str.toUpperCase();
   return str;
@@ -20,8 +20,6 @@ MyButtons::MyButtons() {
   pinMode(BUTTON_C, INPUT_PULLUP);
 }
 
-// Read raw button states into a bitmask.
-// Uses INPUT_PULLUP wiring, so a pressed button reads 0.
 uint8_t MyButtons::readButtons(void) {
   uint8_t buttons = 0;
   if (digitalRead(BUTTON_A) == 0)
@@ -33,8 +31,6 @@ uint8_t MyButtons::readButtons(void) {
   return buttons;
 }
 
-// Debounced button reader: returns only buttons that transitioned
-// from up -> pressed since the last stable reading.
 uint8_t MyButtons::readButtonsOnClick(void) {
   static uint8_t lastReading = 0;
   static uint8_t stableState = 0;
@@ -62,7 +58,7 @@ uint8_t MyButtons::readButtonsOnClick(void) {
 MyDisplay::MyDisplay() {}
 
 void MyDisplay::init() {
-  display.begin(0x3C, true); // I2C address 0x3C, reset= true
+  display.begin(0x3C, true);
   display.clearDisplay();
   display.display();
   display.setRotation(3);
@@ -100,7 +96,6 @@ void MyDisplay::showSettingsMenu(String options[], int numOptions,
   display.setCursor(30, 2);
   display.print("SETTINGS");
 
-  // Scroll window: keep the selected row visible in a 3-row viewport.
   int windowStart = 0;
   if (numOptions > 3) {
     if (selectedOption == 0)
@@ -141,14 +136,13 @@ void MyDisplay::showSettingsMenu(String options[], int numOptions,
   display.display();
 }
 
-void MyDisplay::showStatusViewSelectonScreen() {
+void MyDisplay::showStatusViewSelectionScreen() {
   display.clearDisplay();
   display.fillRect(0, 0, 128, 11, SH110X_WHITE);
   display.setTextColor(SH110X_BLACK, SH110X_WHITE);
   display.setCursor(15, 2);
   display.print("SELECT VIEW");
 
-  // Three device-selection tiles (A=Gate, B=Pond, C=Fountains)
   display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   display.drawRect(0, 14, 128, 15, SH110X_WHITE);
   display.setCursor(4, 19);
@@ -182,23 +176,19 @@ void MyDisplay::showTheIsValues(const char *deviceNameChar, int maxWind,
   display.print(deviceName + ":");
 
   if (controledDeviceOnOrOff) {
-    // Draw "ON" with a white background highlight
     display.fillRect(xTrue - 2, y - 1, 20, 9, SH110X_WHITE);
     display.setTextColor(SH110X_BLACK, SH110X_WHITE);
     display.setCursor(xTrue + 2, y);
     display.print("ON");
 
-    // Draw "OFF" with a black background (no highlight)
     display.setTextColor(SH110X_WHITE, SH110X_BLACK);
     display.setCursor(xFalse, y);
     display.print("OFF");
   } else {
-    // Draw "ON" with a black background (no highlight)
     display.setTextColor(SH110X_WHITE, SH110X_BLACK);
     display.setCursor(xTrue + 2, y);
     display.print("ON");
 
-    // Draw "OFF" with a white background highlight
     display.fillRect(xFalse - 2, y - 1, 20, 9, SH110X_WHITE);
     display.setTextColor(SH110X_BLACK, SH110X_WHITE);
     display.setCursor(xFalse, y);
@@ -206,7 +196,6 @@ void MyDisplay::showTheIsValues(const char *deviceNameChar, int maxWind,
   }
 
   display.setTextColor(SH110X_WHITE, SH110X_BLACK);
-  // Manual mode banner vs. schedule summary
   if (off_auto_manual == MODE_OFF || off_auto_manual == MODE_MANUAL_ON) {
     display.fillRect(0, 32, 128, 28, SH110X_WHITE);
     display.setCursor(2, 36);
@@ -217,7 +206,7 @@ void MyDisplay::showTheIsValues(const char *deviceNameChar, int maxWind,
     display.print("Manual Mode");
   } else {
     display.setCursor(0, 32);
-    display.println("Max wind: " + String(maxWind) + " hm/h");
+    display.println("Max wind: " + String(maxWind) + " km/h");
     display.setCursor(0, 42);
 
     String startTime = (startHour < 10 ? "0" : "") + String(startHour) + ":" +
@@ -258,8 +247,7 @@ void MyDisplay::showIntKmhSetting(String label, int value,
   display.print("KM/H");
   display.setTextSize(1);
 
-  // Back button
-  display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  // Back button (highlightTarget == 2)
   if (highlightTarget == 2) {
     display.fillRect(0, 52, 40, 12, SH110X_WHITE);
     display.setTextColor(SH110X_BLACK, SH110X_WHITE);
@@ -267,7 +255,12 @@ void MyDisplay::showIntKmhSetting(String label, int value,
     display.drawRect(0, 52, 40, 12, SH110X_WHITE);
     display.setTextColor(SH110X_WHITE, SH110X_BLACK);
   }
+  display.setCursor(6, 54);
+  display.print("Back");
+
+  display.display();
 }
+
 void MyDisplay::showTimeIntervalSetting(String label, int startHour,
                                         int startMin, int endHour, int endMin,
                                         int highlightTarget) {
@@ -277,7 +270,6 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
   display.setCursor(23, 2);
   display.print(to_upper(label));
 
-  // Time fields: HH : MM — dash — HH : MM
   display.setTextSize(2);
   int y = 20;
   char buf[3];
@@ -290,7 +282,6 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
   int xColon2 = xEndHour + boxW;
   int xEndMin = xColon2 + 8;
 
-  // Start hour (field 1)
   sprintf(buf, "%02d", startHour);
   display.setTextColor(highlightTarget == 1 ? SH110X_BLACK : SH110X_WHITE,
                        highlightTarget == 1 ? SH110X_WHITE : SH110X_BLACK);
@@ -303,7 +294,6 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
   display.setCursor(xColon1 + 2, y);
   display.print(":");
 
-  // Start minute (field 2)
   sprintf(buf, "%02d", startMin);
   display.setTextColor(highlightTarget == 2 ? SH110X_BLACK : SH110X_WHITE,
                        highlightTarget == 2 ? SH110X_WHITE : SH110X_BLACK);
@@ -312,12 +302,10 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
   display.setCursor(xStartMin + 1, y);
   display.print(buf);
 
-  // Dash separator
   int dashY = y + 7;
   display.drawLine(xDash + 2, dashY, xDash + 7, dashY, SH110X_WHITE);
   display.drawLine(xDash + 2, dashY + 1, xDash + 7, dashY + 1, SH110X_WHITE);
 
-  // End hour (field 3)
   sprintf(buf, "%02d", endHour);
   display.setTextColor(highlightTarget == 3 ? SH110X_BLACK : SH110X_WHITE,
                        highlightTarget == 3 ? SH110X_WHITE : SH110X_BLACK);
@@ -330,7 +318,6 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
   display.setCursor(xColon2 + 2, y);
   display.print(":");
 
-  // End minute (field 4)
   sprintf(buf, "%02d", endMin);
   display.setTextColor(highlightTarget == 4 ? SH110X_BLACK : SH110X_WHITE,
                        highlightTarget == 4 ? SH110X_WHITE : SH110X_BLACK);
@@ -341,7 +328,6 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
 
   display.setTextSize(1);
 
-  // Back button (field 5)
   if (highlightTarget == 5) {
     display.fillRect(0, 52, 40, 12, SH110X_WHITE);
     display.setTextColor(SH110X_BLACK, SH110X_WHITE);
@@ -360,6 +346,29 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
 
 InfoController::InfoController(MyDisplay &disp) : display(disp) {}
 
+void InfoController::drawDefaultScreen() {
+  CurrentConditions c;
+  getCurrentConditions(c);
+  display.showCurrentInformation(c.windSpeed, c.temperature, c.hours,
+                                 c.minutes);
+}
+
+void InfoController::drawDeviceStatus() {
+  DeviceSettings deviceSttings;
+  CurrentConditions currentConditions;
+  getCurrentConditions(currentConditions);
+  getDeviceSettings(selectedDevice, deviceSttings);
+
+  bool controledDeviceOnOrOff = RadioManager::computeDesiredState(
+      deviceSttings, false, currentConditions.windSpeed,
+      currentConditions.hours, currentConditions.minutes);
+
+  display.showTheIsValues(deviceSttings.name, deviceSttings.windLimit,
+                          deviceSttings.startHour, deviceSttings.startMin,
+                          deviceSttings.endHour, deviceSttings.endMin,
+                          deviceSttings.mode, controledDeviceOnOrOff);
+}
+
 void InfoController::handleInput(uint8_t buttons) {
   if (buttons == 0)
     return;
@@ -367,10 +376,10 @@ void InfoController::handleInput(uint8_t buttons) {
   switch (screen) {
   case INFO_DEFAULT:
     screen = INFO_SELECT_DEVICE;
+    display.showStatusViewSelectionScreen();
     break;
+
   case INFO_SELECT_DEVICE:
-    // Button bits: 0b001 = device A (Gate), 0b010 = B (Pond), 0b100 = C
-    // (Fountains)
     switch (buttons) {
     case BTN_A:
       selectedDevice = DEVICE_GATE;
@@ -382,53 +391,23 @@ void InfoController::handleInput(uint8_t buttons) {
       selectedDevice = DEVICE_FOUNTAINS;
       break;
     default:
-      // Handle no buttons or unexpected values
       break;
     }
     screen = INFO_SHOW_DEVICE;
+    drawDeviceStatus();
     break;
+
   case INFO_SHOW_DEVICE:
     screen = INFO_DEFAULT;
+    drawDefaultScreen();
     break;
   }
 }
 
-void InfoController::render() {
-  switch (screen) {
-  case INFO_DEFAULT: {
-    CurrentConditions c;
-    getCurrentConditions(c);
-    display.showCurrentInformation(c.windSpeed, c.temperature, c.hours,
-                                   c.minutes);
-    break;
-  }
-  case INFO_SELECT_DEVICE:
-    display.showStatusViewSelectonScreen();
-    break;
-  case INFO_SHOW_DEVICE: {
-    DeviceSettings deviceSttings;
-    CurrentConditions currentConditions;
-    getCurrentConditions(currentConditions);
-    getDeviceSettings(selectedDevice, deviceSttings);
-
-    bool controledDeviceOnOrOff = RadioManager::computeDesiredState(
-        deviceSttings, false, currentConditions.windSpeed,
-        currentConditions.hours, currentConditions.minutes);
-
-    display.showTheIsValues(deviceSttings.name, deviceSttings.windLimit,
-                            deviceSttings.startHour, deviceSttings.startMin,
-                            deviceSttings.endHour, deviceSttings.endMin,
-                            deviceSttings.mode, controledDeviceOnOrOff);
-
-    // display.showTheIsValues(String(d.name), d.windLimit,
-    // String(startBuf),
-    //                       String(endBuf), onOrOff, manual);
-    break;
-  }
-  }
+void InfoController::resetToDefault() {
+  screen = INFO_DEFAULT;
+  drawDefaultScreen();
 }
-
-void InfoController::resetToDefault() { screen = INFO_DEFAULT; }
 
 // ==========================================
 // MenuController Implementation
@@ -436,12 +415,36 @@ void InfoController::resetToDefault() { screen = INFO_DEFAULT; }
 
 MenuController::MenuController(MyDisplay &disp) : display(disp) {}
 
+void MenuController::drawCurrentScreen() {
+  switch (screen) {
+  case MENU_SELECT_DEVICE:
+    display.showSettingsMenu(deviceListOptions, 4, listSelection);
+    break;
+  case MENU_DEVICE_OPTIONS:
+    display.showSettingsMenu(deviceMenuOptions, 4, listSelection);
+    break;
+  case MENU_MODE_SELECT:
+    display.showSettingsMenu(modeSelectOptions, 4, listSelection);
+    break;
+  case MENU_EDIT_WIND:
+    display.showIntKmhSetting(String(editBuffer.name), editBuffer.windLimit,
+                              currentBlinkTarget());
+    break;
+  case MENU_EDIT_SCHEDULE:
+    display.showTimeIntervalSetting(
+        String(editBuffer.name), editBuffer.startHour, editBuffer.startMin,
+        editBuffer.endHour, editBuffer.endMin, currentBlinkTarget());
+    break;
+  }
+}
+
 void MenuController::reset() {
   screen = MENU_SELECT_DEVICE;
   listSelection = 0;
   editTarget = 1;
   isEditingField = false;
   exitRequested = false;
+  drawCurrentScreen();
 }
 
 bool MenuController::wantsExit() { return exitRequested; }
@@ -449,11 +452,13 @@ bool MenuController::wantsExit() { return exitRequested; }
 void MenuController::handleInput(uint8_t buttons) {
   if (buttons == 0)
     return;
+
   switch (screen) {
   case MENU_SELECT_DEVICE:
     if (navigateList(buttons, 4)) {
       if (listSelection == 3) {
         exitRequested = true;
+        return;
       } else {
         selectedDevice = (DeviceID)listSelection;
         getDeviceSettings(selectedDevice, editBuffer);
@@ -462,6 +467,7 @@ void MenuController::handleInput(uint8_t buttons) {
       }
     }
     break;
+
   case MENU_DEVICE_OPTIONS:
     if (navigateList(buttons, 4)) {
       switch (listSelection) {
@@ -486,6 +492,7 @@ void MenuController::handleInput(uint8_t buttons) {
       }
     }
     break;
+
   case MENU_MODE_SELECT:
     if (navigateList(buttons, 4)) {
       if (listSelection != 3) {
@@ -496,41 +503,20 @@ void MenuController::handleInput(uint8_t buttons) {
       listSelection = 2;
     }
     break;
+
   case MENU_EDIT_WIND:
     handleWindEditInput(buttons);
     break;
+
   case MENU_EDIT_SCHEDULE:
     handleScheduleEditInput(buttons);
     break;
   }
+
+  // Draw immediately on state change
+  drawCurrentScreen();
 }
 
-void MenuController::render() {
-  updateBlink();
-  switch (screen) {
-  case MENU_SELECT_DEVICE:
-    display.showSettingsMenu(deviceListOptions, 4, listSelection);
-    break;
-  case MENU_DEVICE_OPTIONS:
-    display.showSettingsMenu(deviceMenuOptions, 4, listSelection);
-    break;
-  case MENU_MODE_SELECT:
-    display.showSettingsMenu(modeSelectOptions, 4, listSelection);
-    break;
-  case MENU_EDIT_WIND:
-    display.showIntKmhSetting(String(editBuffer.name), editBuffer.windLimit,
-                              currentBlinkTarget());
-    break;
-  case MENU_EDIT_SCHEDULE:
-    display.showTimeIntervalSetting(
-        String(editBuffer.name), editBuffer.startHour, editBuffer.startMin,
-        editBuffer.endHour, editBuffer.endMin, currentBlinkTarget());
-    break;
-  }
-}
-
-// Navigate a 4-row menu list with buttons: B = up, C = down, A = select.
-// Returns true on select.
 bool MenuController::navigateList(uint8_t buttons, int numOptions) {
   switch (static_cast<ButtonState>(buttons)) {
   case BTN_A: // Up
@@ -547,8 +533,6 @@ bool MenuController::navigateList(uint8_t buttons, int numOptions) {
   return false;
 }
 
-// Edit the wind-speed limit while in an active field, or toggle between
-// the value and the Back button.
 void MenuController::handleWindEditInput(uint8_t buttons) {
   if (isEditingField) {
     switch (static_cast<ButtonState>(buttons)) {
@@ -568,9 +552,9 @@ void MenuController::handleWindEditInput(uint8_t buttons) {
     return;
   }
 
-  // Not actively editing the value
   switch (static_cast<ButtonState>(buttons)) {
-  case BTN_A: // Toggle between value and Back
+  case BTN_A:
+  case BTN_C: // Toggle between value and Back
     editTarget = (editTarget == 1) ? 2 : 1;
     break;
   case BTN_B: // Enter edit or confirm
@@ -581,16 +565,11 @@ void MenuController::handleWindEditInput(uint8_t buttons) {
       isEditingField = true;
     }
     break;
-  case BTN_C: // Toggle between value and Back
-    editTarget = (editTarget == 1) ? 2 : 1;
-    break;
-
   default:
     break;
   }
 }
 
-// Edit schedule fields: hours/minutes start/end + Back button.
 void MenuController::handleScheduleEditInput(uint8_t buttons) {
   if (isEditingField) {
     int delta = 0;
@@ -629,7 +608,6 @@ void MenuController::handleScheduleEditInput(uint8_t buttons) {
     return;
   }
 
-  // Not actively editing a field
   switch (static_cast<ButtonState>(buttons)) {
   case BTN_A: // Previous field
     editTarget = (editTarget == 1) ? 5 : editTarget - 1;
@@ -649,10 +627,14 @@ void MenuController::handleScheduleEditInput(uint8_t buttons) {
     break;
   }
 }
+
 void MenuController::updateBlink() {
   if (millis() - lastBlinkToggle > blinkIntervalMs) {
     blinkVisible = !blinkVisible;
     lastBlinkToggle = millis();
+    if (isEditingField) {
+      drawCurrentScreen();
+    }
   }
 }
 
@@ -668,77 +650,55 @@ int MenuController::currentBlinkTarget() {
 
 App::App() : infoController(display), menuController(display) {}
 
-void App::init() { display.init(); }
+void App::init() {
+  display.init();
+  infoController
+      .resetToDefault(); // Render initial state on hardware boot
+}
 
 void App::loop() {
   uint8_t buttons = button.readButtonsOnClick();
-  bool needsRedraw = false;
 
-  // 1. INSTANT USER INPUT HANDLING
   if (buttons != 0) {
-    lastInputTime = millis(); // Reset inactivity timer
-    needsRedraw = true;       // Flag immediate render for button presses!
+    lastInputTime = millis();
   }
 
-  // Handle mode transitions or menu/combo inputs
+  // 1. INPUT AND MODE TRANSITION DISPATCH (Triggers immediate drawing)
   handleModeEntry(buttons);
 
-  // 2. TIMEOUT INACTIVITY RESET
+  // 2. INACTIVITY TIMEOUT RESET
   if (currentMode == MODE_INFO && (millis() - lastInputTime > infoTimeoutMs)) {
-    // Only flag redraw if we were on a sub-screen
-    infoController.resetToDefault();
-    needsRedraw = true;
-  }
-
-  // 3. PERIODIC REFRESH FOR LIVE DATA (500ms = smooth 2Hz clock/wind updates)
-  static unsigned long lastPeriodicRefresh = 0;
-  if (millis() - lastPeriodicRefresh >= 500) {
-    lastPeriodicRefresh = millis();
-    needsRedraw = true;
-  }
-
-  // 4. RENDER ONLY WHEN DIRTY
-  if (needsRedraw) {
-    switch (currentMode) {
-    case MODE_INFO:
-      infoController.render();
-      break;
-    case MODE_MENU:
-      menuController.render();
-      break;
+    if (!infoController.isDefaultScreen()) {
+      infoController
+          .resetToDefault(); // Draws default view immediately
     }
   }
 
-  delay(10); // Small pause to prevent aggressive CPU spinning
-}
-// void App::loop() {
-//   uint8_t buttons = button.readButtonsOnClick();
-//   if (buttons != 0)
-//     lastInputTime = millis(); // reset inactivity timer on any press
-//
-//   handleModeEntry(buttons);
-//
-//   // Auto-return from menu after 8s of inactivity
-//   if (currentMode == MODE_INFO && (millis() - lastInputTime > infoTimeoutMs))
-//   {
-//     infoController.resetToDefault();
-//   }
-//
-//   switch (currentMode) {
-//   case MODE_INFO:
-//     infoController.render();
-//     break;
-//   case MODE_MENU:
-//     menuController.render();
-//     break;
-//   }
-//   delay(10);
-// }
+  // 2b. MENU INACTIVITY TIMEOUT RESET (discards unsaved edits)
+  if (currentMode == MODE_MENU && (millis() - lastInputTime > menuTimeoutMs)) {
+    currentMode = MODE_INFO;
+    infoController.resetToDefault();
+  }
 
-// Detect the A+B combo (0b011) to enter menu mode; otherwise treat as
-// normal single-button input for the current mode.
+  // 3. PERIODIC REFRESH FOR LIVE DATA (500ms ticker)
+  static unsigned long lastPeriodicRefresh = 0;
+  if (millis() - lastPeriodicRefresh >= 500) {
+    lastPeriodicRefresh = millis();
+    if (currentMode == MODE_INFO && infoController.isDefaultScreen()) {
+      infoController.drawDefaultScreen(); // Updates live clock/wind view
+                                          // immediately
+    }
+  }
+
+  // 4. INLINE EDIT BLINKING TICKER
+  if (currentMode == MODE_MENU) {
+    menuController.updateBlink();
+  }
+
+  delay(10);
+}
+
 void App::handleModeEntry(uint8_t buttons) {
-  // Replace 0 with BTN_NONE
   if (buttons != BTN_NONE && pendingButtons == BTN_NONE) {
     pendingButtons = buttons;
     pendingSince = millis();
@@ -759,24 +719,24 @@ void App::handleModeEntry(uint8_t buttons) {
   if (buttonCombination == BTN_NONE)
     return;
 
-  // A+B combo enters settings menu (replaces 0b011 with BTN_MENU_COMBO)
+  // Combo entry to menu mode
   if (buttonCombination == BTN_MENU_COMBO) {
     currentMode = MODE_MENU;
-    menuController.reset();
+    menuController.reset(); // Renders menu root screen directly
     return;
   }
 
   switch (currentMode) {
-  // Default view: info about CURRENT CONDITIONS, SELECT VIEW, DEVICE STATUS
   case MODE_INFO:
     infoController.handleInput(buttonCombination);
     break;
 
-  // SETTINGS menu
   case MODE_MENU:
     menuController.handleInput(buttonCombination);
     if (menuController.wantsExit()) {
       currentMode = MODE_INFO;
+      infoController
+          .resetToDefault(); // Renders default info view directly
     }
     break;
   }

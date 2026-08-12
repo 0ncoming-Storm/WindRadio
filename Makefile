@@ -2,7 +2,7 @@
 BOARD = rp2040:rp2040:adafruit_feather_rfm
 
 # Fallback target node if no node= parameter is specified
-node ?= brain
+node ?= client
 SKETCH = $(node)/$(node).ino
 BUILD_DIR = $(node)/build
 STAMP = $(BUILD_DIR)/.compiled
@@ -69,7 +69,11 @@ clean:
 	rm -f compile_commands.json
 
 # Installs global structural dependencies for your environment setup
+# (arduino-cli must be on PATH first; see README/install notes)
 setup-deps:
+	arduino-cli config init
+	arduino-cli config add board_manager.additional_urls https://github.com/earlephilhower/arduino-pico/releases/download/global/package_rp2040_index.json
 	arduino-cli core update-index
 	arduino-cli core install rp2040:rp2040
-	arduino-cli lib install "RadioHead" "Adafruit NeoPixel" "RTClib" "Adafruit BusIO"
+	arduino-cli lib update-index
+	arduino-cli lib install "Adafruit NeoPixel" "Adafruit GFX Library" "Adafruit SH110X" "Adafruit BusIO" "_RFM69" "SPIFlash_LowPowerLab"

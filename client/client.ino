@@ -59,7 +59,6 @@ void updateConditionsFromPond(int windSpeed, float temperature, int hours,
   currentConditionsG.temperature = temperature;
   currentConditionsG.hours = hours;
   currentConditionsG.minutes = minutes;
-  // temperature untouched -- no sensor for it yet
   mutex_exit(&currentConditionsMutex);
 }
 

@@ -44,13 +44,13 @@ void setDeviceSettings(DeviceID id, const DeviceSettings &in);
 void getCurrentConditions(CurrentConditions &out);
 #line 55 "/home/storm/Projects/WindRadio/client/client.ino"
 void updateConditionsFromPond(int windSpeed, float temperature, int hours, int minutes);
-#line 71 "/home/storm/Projects/WindRadio/client/client.ino"
+#line 70 "/home/storm/Projects/WindRadio/client/client.ino"
 void setup();
-#line 90 "/home/storm/Projects/WindRadio/client/client.ino"
+#line 89 "/home/storm/Projects/WindRadio/client/client.ino"
 void loop();
-#line 95 "/home/storm/Projects/WindRadio/client/client.ino"
+#line 94 "/home/storm/Projects/WindRadio/client/client.ino"
 void setup1();
-#line 100 "/home/storm/Projects/WindRadio/client/client.ino"
+#line 99 "/home/storm/Projects/WindRadio/client/client.ino"
 void loop1();
 #line 37 "/home/storm/Projects/WindRadio/client/client.ino"
 void getDeviceSettings(DeviceID id, DeviceSettings &out) {
@@ -78,7 +78,6 @@ void updateConditionsFromPond(int windSpeed, float temperature, int hours,
   currentConditionsG.temperature = temperature;
   currentConditionsG.hours = hours;
   currentConditionsG.minutes = minutes;
-  // temperature untouched -- no sensor for it yet
   mutex_exit(&currentConditionsMutex);
 }
 

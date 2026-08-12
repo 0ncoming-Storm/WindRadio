@@ -50,6 +50,7 @@ bool receivePacket(WindRadioPacket &outPkt) {
   }
 
   memcpy(&outPkt, (const void *)radio.DATA, sizeof(outPkt));
+  outPkt.fromNode = radio.SENDERID; // stamp who actually sent it
 
   if (radio.ACKRequested())
     radio.sendACK();
