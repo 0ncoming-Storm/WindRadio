@@ -44,7 +44,11 @@ private:
   // Scheduling / decision logic
   static bool isWithinSchedule(int hours, int minutes, const DeviceSettings &s);
 
-  void sendRelayCommand(uint8_t nodeId, PacketType type, bool relayOn);
+  bool sendRelayCommand(uint8_t nodeId, PacketType type, bool relayOn);
   void decideAndSendCommands();
   void runPollCycle();
 };
+
+// Single global instance (defined in central_control.ino), shared with the
+// UI layer so screens can display actual reported node status.
+extern RadioManager radioManager;

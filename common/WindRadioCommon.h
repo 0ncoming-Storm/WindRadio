@@ -1,5 +1,4 @@
 #pragma once
-#include <Adafruit_NeoPixel.h>
 #include <Arduino.h>
 #include <RFM69.h>
 #include <SPI.h>
@@ -11,7 +10,16 @@
 // hardware pin mappings, and the fixed-size packet structure.
 
 // --- Protocol Version ---
-#define PROTOCOL_VERSION 2
+#define PROTOCOL_VERSION 3
+
+// --- Relay State (wire format) ---
+// Latching relays (e.g. the gate) keep their position through power loss,
+// so a node may genuinely not know its state until the first command.
+enum RelayState : uint8_t {
+  RELAY_OFF = 0,
+  RELAY_ON = 1,
+  RELAY_UNKNOWN = 2,
+};
 
 // --- Physical Node Addresses ---
 #define NODE_MAIN 1
@@ -24,13 +32,11 @@
 #define RFM69_CS PIN_RFM_CS
 #define RFM69_INT PIN_RFM_DIO0
 #define RFM69_RST PIN_RFM_RST
-#define NEOPIXEL_PIN 4
-#define NUM_PIXELS 1
 
 // --- Shared Radio Config ---
 #define NETWORKID 100
 #define FREQUENCY RF69_915MHZ
-#define ENCRYPTKEY "WindRadio"
+#define ENCRYPTKEY "WindRadioEstate1" // MUST be exactly 16 chars (AES-128)
 #define IS_RFM69HW_HCW
 
 // --- Packet Types ---
@@ -56,16 +62,16 @@ struct WindRadioPacket {
       uint8_t minutes;
       int windSpeed;
       float temperature;
-      bool relayOn;
+      RelayState pumpState;
     } pondStatus;
 
     struct { // PKT_RELAY_STATUS
       uint8_t nodeId;
-      bool relayOn;
+      RelayState relayState;
     } relayStatus;
 
     struct { // PKT_SET_RELAY / PKT_SET_POND
-      bool relayOn;
+      bool relayOn; // absolute target state, so retries are idempotent
     } setRelay;
   };
 };
@@ -73,11 +79,8 @@ struct WindRadioPacket {
 
 // --- Shared Objects (Defined in WindRadioCommon.cpp) ---
 extern RFM69 radio;
-extern Adafruit_NeoPixel strip;
 
 // --- Shared Function Prototypes ---
-void blinkNeoPixel(uint8_t red, uint8_t green, uint8_t blue, uint16_t delay_ms,
-                   uint8_t blinks);
 void radioSetup(uint8_t myNodeId);
 bool sendPacket(uint8_t toNodeId, const WindRadioPacket &pkt);
 bool receivePacket(WindRadioPacket &outPkt);

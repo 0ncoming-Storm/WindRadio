@@ -7,11 +7,14 @@
 void RadioManager::init() {
   mutex_init(&nodeStatusMutex);
 
-  // Initialize cached status structs with safe defaults
-  pondStatus = {0, 0, 0, 0.0, false, 0, NODE_OK, 0};
-  gateStatus = {false, 0, NODE_OK, 0};
-  fountain1Status = {false, 0, NODE_OK, 0};
-  fountain2Status = {false, 0, NODE_OK, 0};
+  // Initialize cached status structs in a fail-safe state: every node is
+  // assumed unreachable and its relay state unknown until the first
+  // successful poll, so no relay commands are ever derived from the dummy
+  // boot-time conditions.
+  pondStatus = {0, 0, 0, 0.0f, RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
+  gateStatus = {RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
+  fountain1Status = {RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
+  fountain2Status = {RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
 }
 
 void RadioManager::loop() {
@@ -35,6 +38,8 @@ void RadioManager::getGateStatus(NodeStatus &out) {
 }
 
 void RadioManager::getFountainStatus(uint8_t index, NodeStatus &out) {
+  if (index > 1)
+    index = 1; // clamp: only fountain 1 and 2 exist
   mutex_enter_blocking(&nodeStatusMutex);
   out = (index == 0) ? fountain1Status : fountain2Status;
   mutex_exit(&nodeStatusMutex);
@@ -81,7 +86,7 @@ void RadioManager::pollPondNode() {
     pondStatus.minutes = responsePacket.pondStatus.minutes;
     pondStatus.windSpeed = responsePacket.pondStatus.windSpeed;
     pondStatus.temperature = responsePacket.pondStatus.temperature;
-    pondStatus.relayOn = responsePacket.pondStatus.relayOn;
+    pondStatus.pumpState = responsePacket.pondStatus.pumpState;
     pondStatus.missedPolls = 0;
     pondStatus.error = NODE_OK;
     pondStatus.lastSuccessMs = millis();
@@ -109,7 +114,7 @@ void RadioManager::pollRelayNode(uint8_t nodeId, NodeStatus &status) {
 
   mutex_enter_blocking(&nodeStatusMutex);
   if (ok) {
-    status.relayOn = response.relayStatus.relayOn;
+    status.relayState = response.relayStatus.relayState;
     status.missedPolls = 0;
     status.error = NODE_OK;
     status.lastSuccessMs = millis();
@@ -159,16 +164,25 @@ bool RadioManager::computeDesiredState(const DeviceSettings &settingsStruct,
 }
 
 // Send a relay on/off command to a remote node.
-void RadioManager::sendRelayCommand(uint8_t nodeId, PacketType type,
+// Returns true only if the node acknowledged the command.
+bool RadioManager::sendRelayCommand(uint8_t nodeId, PacketType type,
                                     bool relayOn) {
   WindRadioPacket cmd;
   cmd.type = type;
   cmd.setRelay.relayOn = relayOn;
-  sendPacket(nodeId, cmd);
+  bool ok = sendPacket(nodeId, cmd);
+  if (!ok) {
+    Serial.printf("RadioManager: command (type=%u, on=%d) to node %u not "
+                  "acknowledged\n",
+                  (unsigned)type, relayOn, nodeId);
+  }
+  return ok;
 }
 
 // Core decision loop: compare desired vs. actual relay states and send
-// commands only when a change is needed.
+// commands only when a change is needed. The cached state is updated only
+// when the node acknowledges, so unacknowledged commands are retried on
+// the next poll cycle.
 void RadioManager::decideAndSendCommands() {
   DeviceSettings gateSettings, pondSettings, fountainSettings;
   getDeviceSettings(DEVICE_GATE, gateSettings);
@@ -180,12 +194,15 @@ void RadioManager::decideAndSendCommands() {
   int windSpeed = pondStatus.windSpeed;
   int hours = pondStatus.hours;
   int minutes = pondStatus.minutes;
-  bool gateLastKnown = gateStatus.relayOn;
-  bool pondRelayLastKnown = pondStatus.relayOn;
-  bool fountain1LastKnown = fountain1Status.relayOn;
-  bool fountain2LastKnown = fountain2Status.relayOn;
+  RelayState gateLastKnown = gateStatus.relayState;
+  RelayState pondRelayLastKnown = pondStatus.pumpState;
+  RelayState fountain1LastKnown = fountain1Status.relayState;
+  RelayState fountain2LastKnown = fountain2Status.relayState;
   mutex_exit(&nodeStatusMutex);
 
+  // Desired states are plain bools; comparing against a RelayState works
+  // because RELAY_OFF/RELAY_ON map to 0/1 and RELAY_UNKNOWN (2) differs
+  // from both — so an unknown state always triggers a resolving command.
   bool gateDesired =
       computeDesiredState(gateSettings, windStale, windSpeed, hours, minutes);
   bool pondDesired =
@@ -194,23 +211,34 @@ void RadioManager::decideAndSendCommands() {
                                              windSpeed, hours, minutes);
 
   // Only send commands when the desired state differs from reality
-  if (gateDesired != gateLastKnown) {
-    sendRelayCommand(NODE_GATE, PKT_SET_RELAY, gateDesired);
+  if (gateDesired != gateLastKnown &&
+      sendRelayCommand(NODE_GATE, PKT_SET_RELAY, gateDesired)) {
+    mutex_enter_blocking(&nodeStatusMutex);
+    gateStatus.relayState = gateDesired ? RELAY_ON : RELAY_OFF;
+    mutex_exit(&nodeStatusMutex);
   }
-  if (pondDesired != pondRelayLastKnown) {
-    sendRelayCommand(NODE_POND, PKT_SET_POND, pondDesired);
+  if (pondDesired != pondRelayLastKnown &&
+      sendRelayCommand(NODE_POND, PKT_SET_POND, pondDesired)) {
+    mutex_enter_blocking(&nodeStatusMutex);
+    pondStatus.pumpState = pondDesired ? RELAY_ON : RELAY_OFF;
+    mutex_exit(&nodeStatusMutex);
   }
-  if (fountainDesired != fountain1LastKnown) {
-    sendRelayCommand(NODE_FOUNTAIN1, PKT_SET_RELAY, fountainDesired);
+  if (fountainDesired != fountain1LastKnown &&
+      sendRelayCommand(NODE_FOUNTAIN1, PKT_SET_RELAY, fountainDesired)) {
+    mutex_enter_blocking(&nodeStatusMutex);
+    fountain1Status.relayState = fountainDesired ? RELAY_ON : RELAY_OFF;
+    mutex_exit(&nodeStatusMutex);
   }
-  if (fountainDesired != fountain2LastKnown) {
-    sendRelayCommand(NODE_FOUNTAIN2, PKT_SET_RELAY, fountainDesired);
+  if (fountainDesired != fountain2LastKnown &&
+      sendRelayCommand(NODE_FOUNTAIN2, PKT_SET_RELAY, fountainDesired)) {
+    mutex_enter_blocking(&nodeStatusMutex);
+    fountain2Status.relayState = fountainDesired ? RELAY_ON : RELAY_OFF;
+    mutex_exit(&nodeStatusMutex);
   }
 }
 
 // Full poll cycle: poll pond + all relay nodes, then decide on commands.
 void RadioManager::runPollCycle() {
-  Serial.println("starting poll cycle");
   pollPondNode();
   pollRelayNode(NODE_GATE, gateStatus);
   pollRelayNode(NODE_FOUNTAIN1, fountain1Status);

@@ -4,8 +4,8 @@
 // Included by every node (base station + remote sensors) to avoid duplication.
 
 // RFM69 radio instance. Pin layout matches the shared WindRadioCommon.h
-// aliases. The 4th argument (PIN_RFM_DIO0) doubles as the RST pin on RFM69HW
-// modules.
+// aliases (CS, DIO0/interrupt); reset is pulsed via RFM69_RST in
+// radioSetup() below.
 RFM69 radio(RFM69_CS, RFM69_INT, true, PIN_RFM_DIO0);
 
 // --- Radio Initialization ---

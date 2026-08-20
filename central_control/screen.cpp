@@ -65,8 +65,8 @@ void MyDisplay::init() {
   display.setTextColor(SH110X_WHITE, SH110X_BLACK);
 }
 
-void MyDisplay::showCurrentInformation(int windSpeed, float tempriture,
-                                       int hours, int minuits) {
+void MyDisplay::showCurrentInformation(int windSpeed, float temperature,
+                                       int hours, int minutes) {
   display.clearDisplay();
   display.fillRect(0, 0, 128, 11, SH110X_WHITE);
   display.setTextColor(SH110X_BLACK, SH110X_WHITE);
@@ -78,11 +78,11 @@ void MyDisplay::showCurrentInformation(int windSpeed, float tempriture,
   display.print("Wind Speed: " + String(windSpeed) + " KM/H");
 
   display.setCursor(2, 29);
-  display.print("Temp: " + String(tempriture, 1) + " C");
+  display.print("Temp: " + String(temperature, 1) + " C");
 
   display.setCursor(2, 42);
   char timeBuf[6];
-  sprintf(timeBuf, "%02d:%02d", hours, minuits);
+  sprintf(timeBuf, "%02d:%02d", hours, minutes);
   display.print("Time: " + String(timeBuf));
   display.display();
 }
@@ -161,7 +161,7 @@ void MyDisplay::showTheIsValues(const char *deviceNameChar, int maxWind,
                                 uint8_t startHour, uint8_t startMin,
                                 uint8_t endHour, uint8_t endMin,
                                 DeviceMode off_auto_manual,
-                                bool controledDeviceOnOrOff) {
+                                RelayState relayState) {
   String deviceName = String(deviceNameChar);
   display.clearDisplay();
   display.fillRect(0, 0, 128, 11, SH110X_WHITE);
@@ -174,7 +174,14 @@ void MyDisplay::showTheIsValues(const char *deviceNameChar, int maxWind,
   display.setCursor(2, y);
   display.print(deviceName + ":");
 
-  if (controledDeviceOnOrOff) {
+  if (relayState == RELAY_UNKNOWN) {
+    // Node has not reported a state yet (e.g. latching relay before the
+    // first command) — show a placeholder instead of guessing.
+    display.setTextSize(2);
+    display.setCursor(88, y - 4);
+    display.print("?");
+    display.setTextSize(1);
+  } else if (relayState == RELAY_ON) {
     display.fillRect(xTrue - 2, y - 1, 20, 9, SH110X_WHITE);
     display.setTextColor(SH110X_BLACK, SH110X_WHITE);
     display.setCursor(xTrue + 2, y);
@@ -202,7 +209,7 @@ void MyDisplay::showTheIsValues(const char *deviceNameChar, int maxWind,
     display.setTextColor(SH110X_BLACK, SH110X_WHITE);
     display.print(deviceName + " operating in");
     display.setCursor(30, 46);
-    display.print("Manual Mode");
+    display.print(off_auto_manual == MODE_OFF ? "Manual Off" : "Manual On");
   } else {
     display.setCursor(0, 32);
     display.println("Max wind: " + String(maxWind) + " km/h");
@@ -353,19 +360,45 @@ void InfoController::drawDefaultScreen() {
 }
 
 void InfoController::drawDeviceStatus() {
-  DeviceSettings deviceSttings;
-  CurrentConditions currentConditions;
-  getCurrentConditions(currentConditions);
-  getDeviceSettings(selectedDevice, deviceSttings);
+  DeviceSettings deviceSettings;
+  getDeviceSettings(selectedDevice, deviceSettings);
 
-  bool controledDeviceOnOrOff = RadioManager::computeDesiredState(
-      deviceSttings, false, currentConditions.windSpeed,
-      currentConditions.hours, currentConditions.minutes);
+  // Show the relay state as last reported by the remote node itself,
+  // not the locally computed desired state.
+  RelayState relayState = RELAY_UNKNOWN;
+  switch (selectedDevice) {
+  case DEVICE_POND: {
+    PondNodeStatus pond;
+    radioManager.getPondNodeStatus(pond);
+    relayState = pond.pumpState;
+    break;
+  }
+  case DEVICE_FOUNTAINS: {
+    NodeStatus fountain1, fountain2;
+    radioManager.getFountainStatus(0, fountain1);
+    radioManager.getFountainStatus(1, fountain2);
+    if (fountain1.relayState == RELAY_ON || fountain2.relayState == RELAY_ON)
+      relayState = RELAY_ON; // any running counts as on
+    else if (fountain1.relayState == RELAY_OFF &&
+             fountain2.relayState == RELAY_OFF)
+      relayState = RELAY_OFF;
+    else
+      relayState = RELAY_UNKNOWN;
+    break;
+  }
+  case DEVICE_GATE:
+  default: {
+    NodeStatus gate;
+    radioManager.getGateStatus(gate);
+    relayState = gate.relayState;
+    break;
+  }
+  }
 
-  display.showTheIsValues(deviceSttings.name, deviceSttings.windLimit,
-                          deviceSttings.startHour, deviceSttings.startMin,
-                          deviceSttings.endHour, deviceSttings.endMin,
-                          deviceSttings.mode, controledDeviceOnOrOff);
+  display.showTheIsValues(deviceSettings.name, deviceSettings.windLimit,
+                          deviceSettings.startHour, deviceSettings.startMin,
+                          deviceSettings.endHour, deviceSettings.endMin,
+                          deviceSettings.mode, relayState);
 }
 
 void InfoController::handleInput(uint8_t buttons) {
@@ -390,7 +423,7 @@ void InfoController::handleInput(uint8_t buttons) {
       selectedDevice = DEVICE_FOUNTAINS;
       break;
     default:
-      break;
+      return; // ignore multi-button combos on this screen
     }
     screen = INFO_SHOW_DEVICE;
     drawDeviceStatus();

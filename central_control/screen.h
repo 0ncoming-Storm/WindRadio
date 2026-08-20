@@ -34,15 +34,15 @@ class MyDisplay {
 public:
   MyDisplay();
   void init();
-  void showCurrentInformation(int windSpeed, float tempriture, int hours,
-                              int minuits);
+  void showCurrentInformation(int windSpeed, float temperature, int hours,
+                              int minutes);
   void showSettingsMenu(String options[], int numOptions, int selectedOption);
   void showStatusViewSelectionScreen();
 
   void showTheIsValues(const char *deviceNameChar, int maxWind,
                        uint8_t startHour, uint8_t startMin, uint8_t endHour,
                        uint8_t endMin, DeviceMode off_auto_manual,
-                       bool controledDeviceOnOrOff);
+                       RelayState relayState);
 
   void showIntKmhSetting(String label, int value, int highlightTarget);
   void showTimeIntervalSetting(String label, int startHour, int startMin,

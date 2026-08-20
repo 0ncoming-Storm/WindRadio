@@ -1,5 +1,6 @@
 /*
- * client.ino — WindRadio base station (front panel + display + radio).
+ * central_control.ino — WindRadio base station (front panel + display +
+ * radio).
  *
  * Runs on a Feather RP2040 with dual-core support:
  *   Core 0: UI / display / button handling via App class.
@@ -9,7 +10,6 @@
  *   Buttons: A=GPIO5, B=GPIO6, C=GPIO9 (INPUT_PULLUP)
  *   OLED:    SH1107 on I2C (addr 0x3C)
  *   Radio:   RFM69HW on SPI (CS=RFM69_CS, INT=RFM69_INT, RST=RFM69_RST)
- *   NeoPixel: status LED on GPIO4
  */
 
 #include "RadioManager.h"
@@ -20,7 +20,7 @@
 #include "screen.h"
 
 // ---- Global State & Mutexes ----
-volatile bool core0ReadyG = false; // Synchronizes Core 1 startup
+bool core0ReadyG = false; // Synchronizes Core 1 startup (accessed via atomics)
 
 // Default device settings: {name, windLimit, startHr, startMin, endHr, endMin,
 // mode}
@@ -83,7 +83,7 @@ void setup() {
 
   // Core 0 is finished initializing. Safe for Core 1 to start using
   // hardware/mutexes.
-  core0ReadyG = true;
+  __atomic_store_n(&core0ReadyG, true, __ATOMIC_RELEASE);
 }
 
 void loop() {
@@ -97,7 +97,7 @@ void setup1() {
 }
 
 void loop1() {
-  if (!core0ReadyG)
+  if (!__atomic_load_n(&core0ReadyG, __ATOMIC_ACQUIRE))
     return; // Prevent executing before core 0 completes setup
 
   radioManager.loop(); // Process background radio tasks and dispatch logic

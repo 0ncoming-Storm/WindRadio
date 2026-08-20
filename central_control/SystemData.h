@@ -1,4 +1,5 @@
 #pragma once
+#include <WindRadioCommon.h>
 #include <Arduino.h>
 
 // SystemData.h — shared data types used across all WindRadio firmware.
@@ -33,7 +34,7 @@ enum NodeError : uint8_t {
 
 // Status reported by a relay node (gate or fountain).
 struct NodeStatus {
-  bool relayOn;
+  RelayState relayState;
   uint8_t missedPolls;
   NodeError error;
   unsigned long lastSuccessMs;
@@ -45,7 +46,7 @@ struct PondNodeStatus {
   uint8_t minutes;
   int windSpeed;
   float temperature;
-  bool relayOn;
+  RelayState pumpState;
   uint8_t missedPolls;
   NodeError error;
   unsigned long lastSuccessMs;

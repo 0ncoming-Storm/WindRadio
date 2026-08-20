@@ -2,7 +2,7 @@
 BOARD = rp2040:rp2040:adafruit_feather_rfm
 
 # Fallback target node if no node= parameter is specified
-node ?= client
+node ?= central_control
 SKETCH = $(node)/$(node).ino
 BUILD_DIR = $(node)/build
 STAMP = $(BUILD_DIR)/.compiled
@@ -33,14 +33,24 @@ LIBFLAGS = --library $(CURDIR)/common
 # Optimization overrides to inject -O3 flag
 O3_FLAGS = --build-property "compiler.c.extra_flags=-O3" --build-property "compiler.cpp.extra_flags=-O3"
 
+# Node address for receiver-nonlatching: make node=receiver-nonlatching FOUNTAIN=2
+FOUNTAIN ?= 1
+ifeq ($(strip $(FOUNTAIN)),2)
+FOUNTAIN_DEFINE = NODE_FOUNTAIN2
+else
+FOUNTAIN_DEFINE = NODE_FOUNTAIN1
+endif
+# Appended after O3_FLAGS so its cpp.extra_flags (which includes -O3) wins.
+FOUNTAIN_FLAGS = --build-property "compiler.cpp.extra_flags=-O3 -DFOUNTAIN_NODE_ID=$(FOUNTAIN_DEFINE)"
+
 $(STAMP): $(SOURCES)
 	@if [ ! -d "$(node)" ] || [ ! -f "$(SKETCH)" ]; then \
 		echo "ERROR: Target directory or sketch file '$(SKETCH)' does not exist!"; \
 		exit 1; \
 	fi
-	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(O3_FLAGS) --only-compilation-database $(SKETCH)
+	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(O3_FLAGS) $(FOUNTAIN_FLAGS) --only-compilation-database $(SKETCH)
 	@cp $(BUILD_DIR)/compile_commands.json .
-	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(O3_FLAGS) $(SKETCH)
+	arduino-cli compile --fqbn $(BOARD) --build-path $(BUILD_DIR) $(LIBFLAGS) $(O3_FLAGS) $(FOUNTAIN_FLAGS) $(SKETCH)
 	@touch $(STAMP)
 
 # Force a recompile regardless of timestamps
@@ -76,4 +86,4 @@ setup-deps:
 	arduino-cli core update-index
 	arduino-cli core install rp2040:rp2040
 	arduino-cli lib update-index
-	arduino-cli lib install "Adafruit NeoPixel" "Adafruit GFX Library" "Adafruit SH110X" "Adafruit BusIO" "_RFM69" "SPIFlash_LowPowerLab"
+	arduino-cli lib install "Adafruit NeoPixel" "Adafruit GFX Library" "Adafruit SH110X" "Adafruit BusIO" "_RFM69" "SPIFlash_LowPowerLab" "RTClib"
