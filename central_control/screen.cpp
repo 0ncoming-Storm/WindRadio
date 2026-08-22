@@ -346,6 +346,18 @@ void MyDisplay::showTimeIntervalSetting(String label, int startHour,
   display.display();
 }
 
+void MyDisplay::showErrorBanner(const char *message) {
+  // Inverted bar across the bottom of the screen; drawn OVER whatever the
+  // current screen shows, so callers must redraw the underlying screen when
+  // the banner expires (drawCurrentScreen() already does this).
+  display.fillRect(0, 52, 128, 12, SH110X_WHITE);
+  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setTextSize(1);
+  display.setCursor(4, 55);
+  display.print(message);
+  display.display();
+}
+
 // ==========================================
 // InfoController Implementation
 // ==========================================
@@ -454,6 +466,14 @@ void MenuController::drawCurrentScreen() {
     break;
   case MENU_DEVICE_OPTIONS:
     display.showSettingsMenu(deviceMenuOptions, 4, listSelection);
+    // Error banner after saving an invalid (start == end) schedule.
+    if (scheduleInvalid) {
+      if (millis() - invalidSinceMs < INVALID_BANNER_MS) {
+        display.showErrorBanner("START=END! USE MANUAL");
+      } else {
+        scheduleInvalid = false; // banner expired
+      }
+    }
     break;
   case MENU_MODE_SELECT:
     display.showSettingsMenu(modeSelectOptions, 4, listSelection);
@@ -620,7 +640,6 @@ void MenuController::handleScheduleEditInput(uint8_t buttons) {
     default:
       break;
     }
-
     if (delta != 0) {
       switch (editTarget) {
       case 1:
@@ -644,14 +663,25 @@ void MenuController::handleScheduleEditInput(uint8_t buttons) {
   case BTN_A: // Previous field
     editTarget = (editTarget == 1) ? 5 : editTarget - 1;
     break;
-  case BTN_B: // Enter edit or back out
+  case BTN_B: { // Enter edit or back out
     if (editTarget == 5) {
+      // Reject a start time equal to the end time: isWithinSchedule()
+      // treats it as an empty window (always OFF), which is almost never
+      // what the user means — MODE_MANUAL_ON exists for "always on".
+      if (editBuffer.startHour == editBuffer.endHour &&
+          editBuffer.startMin == editBuffer.endMin) {
+        scheduleInvalid = true;
+        invalidSinceMs = millis();
+      } else {
+        scheduleInvalid = false;
+      }
       screen = MENU_DEVICE_OPTIONS;
       listSelection = 0;
     } else {
       isEditingField = true;
     }
     break;
+  }
   case BTN_C: // Next field
     editTarget = (editTarget == 5) ? 1 : editTarget + 1;
     break;

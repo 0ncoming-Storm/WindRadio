@@ -41,7 +41,10 @@ static void replyStatus() {
   pkt.type = PKT_RELAY_STATUS;
   pkt.relayStatus.nodeId = MY_NODE_ID;
   pkt.relayStatus.relayState = relayState;
-  sendPacket(NODE_MAIN, pkt);
+  // Retried blind sends: the base accepts the first valid reply, and
+  // duplicates are harmless because the packet is an absolute snapshot.
+  sendPacketRetried(NODE_MAIN, pkt, STATUS_SEND_ATTEMPTS,
+                    STATUS_RETRY_DELAY_MS);
 }
 
 void setup() {
@@ -56,6 +59,10 @@ void setup() {
 
 void loop() {
   rp2040.wdt_reset();
+  // Idle sleep: receivePacket() returns in microseconds when no packet is
+  // waiting, so without this the core would spin at 100% CPU (and run hot)
+  // polling the radio over SPI. Worst-case command latency is ~2ms.
+  delay(2);
 
   WindRadioPacket pkt;
   if (!receivePacket(pkt))
@@ -70,7 +77,9 @@ void loop() {
 
   case PKT_SET_RELAY:
     applyRelay(pkt.setRelay.relayOn);
-    replyStatus(); // immediate confirmation; next poll re-checks anyway
+    // Protocol v5: no separate ACK packet. The freshly-applied relay state is
+    // the confirmation — reply with a status snapshot (retried).
+    replyStatus();
     break;
 
   default:

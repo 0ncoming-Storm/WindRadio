@@ -10,7 +10,11 @@
 // hardware pin mappings, and the fixed-size packet structure.
 
 // --- Protocol Version ---
-#define PROTOCOL_VERSION 3
+// v4: no RFM69 hardware ACK stack. Reliability comes from application-level
+// retransmits plus the rule that every request is answered with a data packet.
+// v5: PKT_ACK removed entirely — commands are confirmed by a status packet too,
+// and status replies are sent with retries.
+#define PROTOCOL_VERSION 5
 
 // --- Relay State (wire format) ---
 // Latching relays (e.g. the gate) keep their position through power loss,
@@ -39,9 +43,15 @@ enum RelayState : uint8_t {
 #define ENCRYPTKEY "WindRadioEstate1" // MUST be exactly 16 chars (AES-128)
 #define IS_RFM69HW_HCW
 
+// Status replies are blind-retried this many times; the base takes the first
+// one that arrives and duplicates are harmless (absolute snapshots).
+#define STATUS_SEND_ATTEMPTS 3
+#define STATUS_RETRY_DELAY_MS 20
+
 // --- Packet Types ---
 enum PacketType : uint8_t {
-  PKT_POLL_REQUEST, // Sent by base to request a status update from a node
+  PKT_POLL_REQUEST, // Sent by base to request a status update from a node;
+                    // the node's status reply doubles as the acknowledgement
   PKT_POND_STATUS,  // Pond node -> base: wind speed + relay state
   PKT_RELAY_STATUS, // Relay node -> base: relay on/off + error counters
   PKT_SET_RELAY,    // Base -> relay node: command relay on/off
@@ -63,6 +73,7 @@ struct WindRadioPacket {
       int windSpeed;
       float temperature;
       RelayState pumpState;
+      bool rtcOk; // false = node's RTC is dead; time/temp are not real data
     } pondStatus;
 
     struct { // PKT_RELAY_STATUS
@@ -82,5 +93,23 @@ extern RFM69 radio;
 
 // --- Shared Function Prototypes ---
 void radioSetup(uint8_t myNodeId);
+
+// Fire-and-forget transmit (no hardware ACK, no retries). Returns true if
+// the radio accepted the packet for transmission.
 bool sendPacket(uint8_t toNodeId, const WindRadioPacket &pkt);
+
+// Application-level retransmit: blind-sends the packet up to `attempts`
+// times with `retryDelayMs` between sends. Delivery is NOT confirmed here;
+// callers verify by waiting for the expected reply themselves.
+void sendPacketRetried(uint8_t toNodeId, const WindRadioPacket &pkt,
+                       uint8_t attempts, unsigned long retryDelayMs);
+
+// Poll for an incoming packet. Returns true and populates outPkt if a valid
+// WindRadioPacket is received. Never acknowledges anything at the radio
+// level — replies are the caller's decision.
 bool receivePacket(WindRadioPacket &outPkt);
+
+// Send a custom application-level ACK confirming that `ackedType` was
+// received and fully processed (nodes acknowledge commands only after
+// acting on them).
+

@@ -4,7 +4,7 @@
  *
  * Runs on a Feather RP2040 with dual-core support:
  *   Core 0: UI / display / button handling via App class.
- *   Core 1: background radio polling via RadioManager.
+ *   Core 1: radio init + background polling via RadioManager.
  *
  * Wiring:
  *   Buttons: A=GPIO5, B=GPIO6, C=GPIO9 (INPUT_PULLUP)
@@ -72,10 +72,9 @@ void setup() {
   mutex_init(&currentConditionsMutex);
   radioManager.init(); // Initializes radio manager mutexes internally
   Serial.begin(115200);
-  // while (!Serial) {
-  //   ; // Do nothing, just loop
-  // }
-  radioSetup(NODE_MAIN);
+  while (!Serial) {
+    ; // Do nothing, just loop
+  }
   Wire.begin();
   Wire.setClock(400000);
   delay(250); // Wait for the OLED to power up
@@ -90,15 +89,20 @@ void loop() {
   app.loop(); // Handle UI and Display
 }
 
-// ================= CORE 1 (Radio Polling & Logic) =================
+// ================= CORE 1 (Radio Init, Polling & Logic) =================
 void setup1() {
-  // Wait here passively; actual initialization tied to hardware happens in
-  // Core0's setup()
+  // Wait for core 0 to finish bringing up shared state.
+  while (!__atomic_load_n(&core0ReadyG, __ATOMIC_ACQUIRE))
+    tight_loop_contents();
+
+  // The radio lives entirely on this core: initialization, its DIO0
+  // interrupt, and all SPI traffic. The RFM69 library detaches/re-attaches
+  // its interrupt handler during normal operation (every receiveDone()),
+  // which must not happen from a different core than the one servicing
+  // that interrupt.
+  radioSetup(NODE_MAIN);
 }
 
 void loop1() {
-  if (!__atomic_load_n(&core0ReadyG, __ATOMIC_ACQUIRE))
-    return; // Prevent executing before core 0 completes setup
-
   radioManager.loop(); // Process background radio tasks and dispatch logic
 }

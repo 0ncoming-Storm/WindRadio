@@ -47,6 +47,7 @@ public:
   void showIntKmhSetting(String label, int value, int highlightTarget);
   void showTimeIntervalSetting(String label, int startHour, int startMin,
                                int endHour, int endMin, int highlightTarget);
+  void showErrorBanner(const char *message); // bottom-row warning banner
 
 private:
   Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -96,6 +97,12 @@ private:
   int editTarget = 1;
   bool isEditingField = false;
   bool exitRequested = false;
+
+  // Set when the user saves a schedule with start == end; the schedule
+  // screen shows an error banner for a few seconds after returning.
+  bool scheduleInvalid = false;
+  unsigned long invalidSinceMs = 0;
+  static constexpr unsigned long INVALID_BANNER_MS = 3000;
 
   bool blinkVisible = true;
   unsigned long lastBlinkToggle = 0;

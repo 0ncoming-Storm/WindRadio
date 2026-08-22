@@ -68,7 +68,11 @@ static void replyStatus() {
   pkt.pondStatus.windSpeed = (int)mapWindSpeed(analogRead(WIND_SENSOR_PIN));
   pkt.pondStatus.temperature = temperature;
   pkt.pondStatus.pumpState = pumpState;
-  sendPacket(NODE_MAIN, pkt);
+  pkt.pondStatus.rtcOk = rtcOk;
+  // Retried blind sends: the base accepts the first valid reply, and
+  // duplicates are harmless because the packet is an absolute snapshot.
+  sendPacketRetried(NODE_MAIN, pkt, STATUS_SEND_ATTEMPTS,
+                    STATUS_RETRY_DELAY_MS);
 }
 
 void setup() {
@@ -88,6 +92,10 @@ void setup() {
 
 void loop() {
   rp2040.wdt_reset();
+  // Idle sleep: receivePacket() returns in microseconds when no packet is
+  // waiting, so without this the core would spin at 100% CPU (and run hot)
+  // polling the radio over SPI. Worst-case command latency is ~2ms.
+  delay(2);
 
   WindRadioPacket pkt;
   if (!receivePacket(pkt))
@@ -102,7 +110,9 @@ void loop() {
 
   case PKT_SET_POND:
     applyPump(pkt.setRelay.relayOn);
-    replyStatus(); // immediate confirmation; next poll re-checks anyway
+    // Protocol v5: no separate ACK packet. The freshly-applied pump state is
+    // the confirmation — reply with a status snapshot (retried).
+    replyStatus();
     break;
 
   default:

@@ -40,8 +40,10 @@ FOUNTAIN_DEFINE = NODE_FOUNTAIN2
 else
 FOUNTAIN_DEFINE = NODE_FOUNTAIN1
 endif
-# Appended after O3_FLAGS so its cpp.extra_flags (which includes -O3) wins.
-FOUNTAIN_FLAGS = --build-property "compiler.cpp.extra_flags=-O3 -DFOUNTAIN_NODE_ID=$(FOUNTAIN_DEFINE)"
+# Appended after O3_FLAGS so the last --build-property wins. Both .c and .cpp
+# extra_flags get -O3 plus -DFOUNTAIN_NODE_ID so any language sees the define.
+FOUNTAIN_FLAGS = --build-property "compiler.c.extra_flags=-O3 -DFOUNTAIN_NODE_ID=$(FOUNTAIN_DEFINE)" \
+                 --build-property "compiler.cpp.extra_flags=-O3 -DFOUNTAIN_NODE_ID=$(FOUNTAIN_DEFINE)"
 
 $(STAMP): $(SOURCES)
 	@if [ ! -d "$(node)" ] || [ ! -f "$(SKETCH)" ]; then \

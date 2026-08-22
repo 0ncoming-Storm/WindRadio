@@ -47,6 +47,7 @@ struct PondNodeStatus {
   int windSpeed;
   float temperature;
   RelayState pumpState;
+  bool rtcOk; // false = pond node's RTC failed; time/temp are not real data
   uint8_t missedPolls;
   NodeError error;
   unsigned long lastSuccessMs;

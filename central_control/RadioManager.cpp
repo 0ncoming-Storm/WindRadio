@@ -4,6 +4,60 @@
 // RadioManager.cpp — Core 1 thread for polling remote nodes and controlling
 // relays.
 
+// Set to 0 to silence all radio debug output on USB serial.
+// Levels (RLOG_LEVEL):
+//   1 = errors and cycle summaries only
+//   2 = level 1 + per-attempt send/reply/result lines
+//   3 = level 2 + every listen-slice tick and radio state dumps
+#define RADIO_DEBUG 1
+#define RLOG_LEVEL 3
+
+#if RADIO_DEBUG
+#define RLOG(...)                          \
+  do {                                     \
+    if (RLOG_LEVEL >= 1)                   \
+      Serial.printf(__VA_ARGS__);          \
+  } while (0)
+#define RLOG2(...)                         \
+  do {                                     \
+    if (RLOG_LEVEL >= 2)                   \
+      Serial.printf(__VA_ARGS__);          \
+  } while (0)
+#define RLOG3(...)                         \
+  do {                                     \
+    if (RLOG_LEVEL >= 3)                   \
+      Serial.printf(__VA_ARGS__);          \
+  } while (0)
+static const char *relayStateName(RelayState s) {
+  switch (s) {
+  case RELAY_OFF:
+    return "OFF";
+  case RELAY_ON:
+    return "ON";
+  default:
+    return "UNKNOWN";
+  }
+}
+static const char *packetTypeName(PacketType t) {
+  switch (t) {
+  case PKT_POLL_REQUEST:
+    return "POLL_REQ";
+  case PKT_POND_STATUS:
+    return "POND_STATUS";
+  case PKT_RELAY_STATUS:
+    return "RELAY_STATUS";
+  case PKT_SET_RELAY:
+    return "SET_RELAY";
+  case PKT_SET_POND:
+    return "SET_POND";
+  default:
+    return "?";
+  }
+}
+#else
+#define RLOG(...)
+#endif
+
 void RadioManager::init() {
   mutex_init(&nodeStatusMutex);
 
@@ -11,7 +65,7 @@ void RadioManager::init() {
   // assumed unreachable and its relay state unknown until the first
   // successful poll, so no relay commands are ever derived from the dummy
   // boot-time conditions.
-  pondStatus = {0, 0, 0, 0.0f, RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
+  pondStatus = {0, 0, 0, 0.0f, RELAY_UNKNOWN, false, 255, NODE_ERR_TIMEOUT, 0};
   gateStatus = {RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
   fountain1Status = {RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
   fountain2Status = {RELAY_UNKNOWN, 255, NODE_ERR_TIMEOUT, 0};
@@ -19,10 +73,16 @@ void RadioManager::init() {
 
 void RadioManager::loop() {
   // Run a full poll cycle every POLL_CYCLE_MS
-  if (millis() - lastPollCycle >= POLL_CYCLE_MS) {
-    lastPollCycle = millis();
+  unsigned long now = millis();
+  if (now - lastPollCycle >= POLL_CYCLE_MS) {
+    lastPollCycle = now;
     runPollCycle();
+    return;
   }
+  // Nothing to do yet: sleep until the next cycle instead of spinning the
+  // core flat-out.
+  unsigned long remaining = POLL_CYCLE_MS - (now - lastPollCycle);
+  delay(min(remaining, 250UL));
 }
 
 void RadioManager::getPondNodeStatus(PondNodeStatus &out) {
@@ -45,41 +105,96 @@ void RadioManager::getFountainStatus(uint8_t index, NodeStatus &out) {
   mutex_exit(&nodeStatusMutex);
 }
 
-// Poll a single node and return its response packet. Returns false on timeout.
-bool RadioManager::pollNode(uint8_t nodeId, WindRadioPacket &outResponse,
+// Send a request and wait for the expected reply, retransmitting at the
+// application level while it doesn't arrive. The RFM69 hardware ACK stack
+// is unused: reliability comes from the protocol itself — every request is
+// supposed to elicit exactly one reply packet — status data for polls and
+// for commands alike (a node answers a command with its fresh status) — so a
+// received reply proves delivery of both directions.
+//
+// The timeout budget is split across POLL_ATTEMPTS send/listen rounds. Only
+// version-matching packets of `expectType` from `nodeId` count as a reply;
+// anything else is logged and ignored. Returns false on timeout.
+bool RadioManager::transact(uint8_t nodeId, const WindRadioPacket &request,
+                            PacketType expectType, WindRadioPacket &outResponse,
                             unsigned long timeoutMs) {
-  WindRadioPacket requestPacket;
-  requestPacket.type = PKT_POLL_REQUEST;
+  const unsigned long listenSlice = timeoutMs / POLL_ATTEMPTS;
 
-  if (!sendPacket(nodeId, requestPacket)) {
-    return false;
+  // --- Radio state dump before the exchange (level 3) ---
+#if RADIO_DEBUG
+  if (RLOG_LEVEL >= 3) {
+    Serial.printf("[%lu] radio: pre-send mode=0x%02x irq1=0x%02x irq2=0x%02x "
+                  "rssi=%d\n",
+                  millis(), (unsigned)radio.readReg(0x01),
+                  (unsigned)radio.readReg(0x27), (unsigned)radio.readReg(0x28),
+                  (int)radio.readRSSI(true));
   }
+#endif
 
-  unsigned long start = millis();
-  while (millis() - start < timeoutMs) {
-    WindRadioPacket incomingPacket;
-    if (receivePacket(incomingPacket)) {
-      if (incomingPacket.version != PROTOCOL_VERSION) {
-        continue; // ignore outdated protocol versions
-      }
-      if (incomingPacket.fromNode != nodeId) {
-        continue; // ignore packets from a different node
-      }
-      outResponse = incomingPacket;
-      return true;
+  for (uint8_t attempt = 0; attempt < POLL_ATTEMPTS; attempt++) {
+    RLOG("[%lu] -> node %u %s (attempt %u/%u, listen %lums)\n", millis(),
+         nodeId, packetTypeName(request.type), attempt + 1,
+         (unsigned)POLL_ATTEMPTS, listenSlice);
+    if (!sendPacket(nodeId, request)) {
+      // Radio-level TX fault: no packet went out, so waiting for a reply is
+      // pointless — skip straight to the next attempt.
+      RLOG2("[%lu] .. node %u: attempt %u TX fault, skipping listen\n",
+            millis(), nodeId, attempt + 1);
+      continue;
     }
+
+    unsigned long deadline = millis() + listenSlice;
+    while ((long)(millis() - deadline) < 0) {
+      WindRadioPacket incomingPacket;
+      if (receivePacket(incomingPacket)) {
+        RLOG3("[%lu] radio: got %u-byte pkt from node %u type=%s v%u\n",
+              millis(), (unsigned)sizeof(incomingPacket), incomingPacket.fromNode,
+              packetTypeName(incomingPacket.type), incomingPacket.version);
+        if (incomingPacket.version != PROTOCOL_VERSION) {
+          RLOG("[%lu] <- node %u: dropped v%u packet\n", millis(),
+               incomingPacket.fromNode, incomingPacket.version);
+          continue; // ignore outdated protocol versions
+        }
+        if (incomingPacket.fromNode != nodeId) {
+          RLOG("[%lu] <- stray %s packet from node %u\n", millis(),
+               packetTypeName(incomingPacket.type), incomingPacket.fromNode);
+          continue; // ignore packets from a different node
+        }
+        if (incomingPacket.type != expectType) {
+          RLOG("[%lu] <- node %u: unexpected %s (wanted %s)\n", millis(),
+               nodeId, packetTypeName(incomingPacket.type),
+               packetTypeName(expectType));
+          continue;
+        }
+        RLOG("[%lu] <- node %u replied %s\n", millis(), nodeId,
+             packetTypeName(incomingPacket.type));
+        outResponse = incomingPacket;
+        return true;
+      }
+      // Incoming packets are captured by the radio's interrupt handler, so a
+      // 1ms harvest interval cannot miss anything; without this the loop
+      // would hammer the SPI bus at full CPU speed for the whole timeout.
+      delay(1);
+    }
+    RLOG2("[%lu] .. node %u: attempt %u timed out after %lums\n", millis(),
+          nodeId, attempt + 1, listenSlice);
   }
+  RLOG("[%lu] <- node %u: no reply within %lums\n", millis(), nodeId,
+       timeoutMs);
   return false;
 }
 
 // Poll the pond node for wind data + pump relay status, then feed the
 // wind conditions into the shared CurrentConditions struct.
 void RadioManager::pollPondNode() {
+  WindRadioPacket requestPacket;
+  requestPacket.type = PKT_POLL_REQUEST;
   WindRadioPacket responsePacket;
-  CurrentConditions receivedCurrentConditions;
-  bool ok = pollNode(NODE_POND, responsePacket, POLL_TIMEOUT_MS) &&
-            responsePacket.type == PKT_POND_STATUS;
+  // The status reply doubles as the poll acknowledgement.
+  bool ok = transact(NODE_POND, requestPacket, PKT_POND_STATUS, responsePacket,
+                     POLL_TIMEOUT_MS);
 
+  uint8_t missed = 0;
   mutex_enter_blocking(&nodeStatusMutex);
   if (ok) {
     pondStatus.hours = responsePacket.pondStatus.hours;
@@ -87,18 +202,40 @@ void RadioManager::pollPondNode() {
     pondStatus.windSpeed = responsePacket.pondStatus.windSpeed;
     pondStatus.temperature = responsePacket.pondStatus.temperature;
     pondStatus.pumpState = responsePacket.pondStatus.pumpState;
+    pondStatus.rtcOk = responsePacket.pondStatus.rtcOk;
     pondStatus.missedPolls = 0;
     pondStatus.error = NODE_OK;
     pondStatus.lastSuccessMs = millis();
   } else {
     if (pondStatus.missedPolls < 255)
       pondStatus.missedPolls++;
+    missed = pondStatus.missedPolls;
     if (pondStatus.missedPolls >= 3)
       pondStatus.error = NODE_ERR_TIMEOUT;
   }
   mutex_exit(&nodeStatusMutex);
 
+#if RADIO_DEBUG
   if (ok) {
+    RLOG("[%lu] pond: time=%02u:%02u (%s) wind=%d km/h temp=%.1fC pump=%s\n",
+         millis(), responsePacket.pondStatus.hours,
+         responsePacket.pondStatus.minutes,
+         responsePacket.pondStatus.rtcOk ? "rtc ok" : "RTC DEAD",
+         responsePacket.pondStatus.windSpeed,
+         (double)responsePacket.pondStatus.temperature,
+         relayStateName(responsePacket.pondStatus.pumpState));
+  } else {
+    RLOG("[%lu] pond: no data (missed %u in a row)\n", millis(), missed);
+  }
+#endif
+
+  // Only feed the shared conditions when the node's clock is actually alive.
+  // With a dead RTC its time (and DS3231-derived temperature) are fake
+  // values, and schedules must not be evaluated against them. Wind speed
+  // comes from the analog anemometer, not the RTC, so it is still valid —
+  // but decideAndSendCommands() treats any rtcOk==false as fully stale to be
+  // safe (fail-safe = everything OFF, same as a missed pond).
+  if (ok && responsePacket.pondStatus.rtcOk) {
     updateConditionsFromPond(responsePacket.pondStatus.windSpeed,
                              responsePacket.pondStatus.temperature,
                              responsePacket.pondStatus.hours,
@@ -108,10 +245,14 @@ void RadioManager::pollPondNode() {
 
 // Poll a relay (gate or fountain) node for on/off status + error tracking.
 void RadioManager::pollRelayNode(uint8_t nodeId, NodeStatus &status) {
+  WindRadioPacket requestPacket;
+  requestPacket.type = PKT_POLL_REQUEST;
   WindRadioPacket response;
-  bool ok = pollNode(nodeId, response, POLL_TIMEOUT_MS) &&
-            response.type == PKT_RELAY_STATUS;
+  // The status reply doubles as the poll acknowledgement.
+  bool ok = transact(nodeId, requestPacket, PKT_RELAY_STATUS, response,
+                     POLL_TIMEOUT_MS);
 
+  uint8_t missed = 0;
   mutex_enter_blocking(&nodeStatusMutex);
   if (ok) {
     status.relayState = response.relayStatus.relayState;
@@ -121,10 +262,21 @@ void RadioManager::pollRelayNode(uint8_t nodeId, NodeStatus &status) {
   } else {
     if (status.missedPolls < 255)
       status.missedPolls++;
+    missed = status.missedPolls;
     if (status.missedPolls >= 3)
       status.error = NODE_ERR_TIMEOUT;
   }
   mutex_exit(&nodeStatusMutex);
+
+#if RADIO_DEBUG
+  if (ok) {
+    RLOG("[%lu] node %u: relay=%s\n", millis(), nodeId,
+         relayStateName(response.relayStatus.relayState));
+  } else {
+    RLOG("[%lu] node %u: no data (missed %u in a row)\n", millis(), nodeId,
+         missed);
+  }
+#endif
 }
 
 // Check whether the given hour/minute falls within the device's schedule.
@@ -164,18 +316,25 @@ bool RadioManager::computeDesiredState(const DeviceSettings &settingsStruct,
 }
 
 // Send a relay on/off command to a remote node.
-// Returns true only if the node acknowledged the command.
+// Protocol v5: there is no ACK packet. The node applies the command and then
+// immediately answers with its status data, so `expectType` is the status
+// packet kind for that node. The reply's payload is deliberately ignored —
+// the authoritative state comes from the next poll cycle; this reply only
+// proves delivery. Commands are idempotent absolute-state writes, so a lost
+// reply simply means decideAndSendCommands() retries next cycle.
 bool RadioManager::sendRelayCommand(uint8_t nodeId, PacketType type,
                                     bool relayOn) {
   WindRadioPacket cmd;
   cmd.type = type;
   cmd.setRelay.relayOn = relayOn;
-  bool ok = sendPacket(nodeId, cmd);
-  if (!ok) {
-    Serial.printf("RadioManager: command (type=%u, on=%d) to node %u not "
-                  "acknowledged\n",
-                  (unsigned)type, relayOn, nodeId);
-  }
+
+  PacketType expectType =
+      (type == PKT_SET_POND) ? PKT_POND_STATUS : PKT_RELAY_STATUS;
+
+  WindRadioPacket reply;
+  bool ok = transact(nodeId, cmd, expectType, reply, POLL_TIMEOUT_MS);
+  RLOG("[%lu] cmd -> node %u: %s\n", millis(), nodeId,
+       ok ? "CONFIRMED (status reply)" : "NO REPLY");
   return ok;
 }
 
@@ -190,7 +349,11 @@ void RadioManager::decideAndSendCommands() {
   getDeviceSettings(DEVICE_FOUNTAINS, fountainSettings);
 
   mutex_enter_blocking(&nodeStatusMutex);
-  bool windStale = (pondStatus.error != NODE_OK);
+  // Fail-safe conditions: no fresh pond data, OR the pond node's RTC is
+  // dead (its reported time can't be trusted, so schedules are meaningless).
+  // Either way everything stays OFF until good data returns.
+  bool windStale =
+      (pondStatus.error != NODE_OK) || !pondStatus.rtcOk;
   int windSpeed = pondStatus.windSpeed;
   int hours = pondStatus.hours;
   int minutes = pondStatus.minutes;
@@ -210,35 +373,55 @@ void RadioManager::decideAndSendCommands() {
   bool fountainDesired = computeDesiredState(fountainSettings, windStale,
                                              windSpeed, hours, minutes);
 
+#if RADIO_DEBUG
+  RLOG("[%lu] desired: gate=%s pond=%s fountains=%s | wind=%d km/h (%s)\n",
+       millis(), gateDesired ? "ON" : "OFF", pondDesired ? "ON" : "OFF",
+       fountainDesired ? "ON" : "OFF", windSpeed,
+       windStale ? "STALE" : "fresh");
+#endif
+
   // Only send commands when the desired state differs from reality
-  if (gateDesired != gateLastKnown &&
-      sendRelayCommand(NODE_GATE, PKT_SET_RELAY, gateDesired)) {
-    mutex_enter_blocking(&nodeStatusMutex);
-    gateStatus.relayState = gateDesired ? RELAY_ON : RELAY_OFF;
-    mutex_exit(&nodeStatusMutex);
+  if (gateDesired != gateLastKnown) {
+    RLOG("[%lu] gate needs change: %s -> %s\n", millis(),
+         relayStateName(gateLastKnown), gateDesired ? "ON" : "OFF");
+    if (sendRelayCommand(NODE_GATE, PKT_SET_RELAY, gateDesired)) {
+      mutex_enter_blocking(&nodeStatusMutex);
+      gateStatus.relayState = gateDesired ? RELAY_ON : RELAY_OFF;
+      mutex_exit(&nodeStatusMutex);
+    }
   }
-  if (pondDesired != pondRelayLastKnown &&
-      sendRelayCommand(NODE_POND, PKT_SET_POND, pondDesired)) {
-    mutex_enter_blocking(&nodeStatusMutex);
-    pondStatus.pumpState = pondDesired ? RELAY_ON : RELAY_OFF;
-    mutex_exit(&nodeStatusMutex);
+  if (pondDesired != pondRelayLastKnown) {
+    RLOG("[%lu] pond pump needs change: %s -> %s\n", millis(),
+         relayStateName(pondRelayLastKnown), pondDesired ? "ON" : "OFF");
+    if (sendRelayCommand(NODE_POND, PKT_SET_POND, pondDesired)) {
+      mutex_enter_blocking(&nodeStatusMutex);
+      pondStatus.pumpState = pondDesired ? RELAY_ON : RELAY_OFF;
+      mutex_exit(&nodeStatusMutex);
+    }
   }
-  if (fountainDesired != fountain1LastKnown &&
-      sendRelayCommand(NODE_FOUNTAIN1, PKT_SET_RELAY, fountainDesired)) {
-    mutex_enter_blocking(&nodeStatusMutex);
-    fountain1Status.relayState = fountainDesired ? RELAY_ON : RELAY_OFF;
-    mutex_exit(&nodeStatusMutex);
+  if (fountainDesired != fountain1LastKnown) {
+    RLOG("[%lu] fountain1 needs change: %s -> %s\n", millis(),
+         relayStateName(fountain1LastKnown), fountainDesired ? "ON" : "OFF");
+    if (sendRelayCommand(NODE_FOUNTAIN1, PKT_SET_RELAY, fountainDesired)) {
+      mutex_enter_blocking(&nodeStatusMutex);
+      fountain1Status.relayState = fountainDesired ? RELAY_ON : RELAY_OFF;
+      mutex_exit(&nodeStatusMutex);
+    }
   }
-  if (fountainDesired != fountain2LastKnown &&
-      sendRelayCommand(NODE_FOUNTAIN2, PKT_SET_RELAY, fountainDesired)) {
-    mutex_enter_blocking(&nodeStatusMutex);
-    fountain2Status.relayState = fountainDesired ? RELAY_ON : RELAY_OFF;
-    mutex_exit(&nodeStatusMutex);
+  if (fountainDesired != fountain2LastKnown) {
+    RLOG("[%lu] fountain2 needs change: %s -> %s\n", millis(),
+         relayStateName(fountain2LastKnown), fountainDesired ? "ON" : "OFF");
+    if (sendRelayCommand(NODE_FOUNTAIN2, PKT_SET_RELAY, fountainDesired)) {
+      mutex_enter_blocking(&nodeStatusMutex);
+      fountain2Status.relayState = fountainDesired ? RELAY_ON : RELAY_OFF;
+      mutex_exit(&nodeStatusMutex);
+    }
   }
 }
 
 // Full poll cycle: poll pond + all relay nodes, then decide on commands.
 void RadioManager::runPollCycle() {
+  RLOG("[%lu] --- poll cycle ---\n", millis());
   pollPondNode();
   pollRelayNode(NODE_GATE, gateStatus);
   pollRelayNode(NODE_FOUNTAIN1, fountain1Status);

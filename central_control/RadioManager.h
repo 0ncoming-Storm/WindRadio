@@ -32,11 +32,13 @@ private:
   mutex_t nodeStatusMutex;
 
   unsigned long lastPollCycle = 0;
-  const unsigned long POLL_CYCLE_MS = 30000; // poll every 30s
-  const unsigned long POLL_TIMEOUT_MS = 500; // per-node response timeout
+  const unsigned long POLL_CYCLE_MS = 30000;   // poll every 30s
+  const unsigned long POLL_TIMEOUT_MS = 500;   // per-node response budget
+  const uint8_t POLL_ATTEMPTS = 3;             // app-level retransmits per exchange
 
   // Low-level radio helpers
-  bool pollNode(uint8_t nodeId, WindRadioPacket &outResponse,
+  bool transact(uint8_t nodeId, const WindRadioPacket &request,
+                PacketType expectType, WindRadioPacket &outResponse,
                 unsigned long timeoutMs);
   void pollPondNode();
   void pollRelayNode(uint8_t nodeId, NodeStatus &status);
