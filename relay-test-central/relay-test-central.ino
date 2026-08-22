@@ -93,10 +93,26 @@ static void toggleNode(uint8_t idx) {
 
 static void pollNode() {
   Serial.print("Poll which node? 1=GATE 2=POND 3=FN1 4=FN2\n> ");
-  while (!Serial.available())
-    delay(10);
-  char c = Serial.read();
-  Serial.println(c);
+  // Wait for a real command char, skipping the line ending that follows it.
+  char c = 0;
+  while (true) {
+    if (!Serial.available()) {
+      delay(10);
+      continue;
+    }
+    char ch = Serial.read();
+    if (ch == '\r' || ch == '\n') {
+      if (c) {
+        break; // terminator after our selection
+      }
+      continue; // leading newline — skip
+    }
+    if (!c) {
+      c = ch; // first printable char = selection
+      Serial.println(ch);
+    }
+    // extra characters before the newline are ignored
+  }
   if (c < '1' || c > '4') {
     Serial.println("invalid");
     return;
@@ -143,10 +159,18 @@ void setup() {
 }
 
 void loop() {
+  // Consume any leading newline/CR left in the buffer by the monitor's
+  // line-ending before reading the actual command character.
+  while (Serial.available() && (Serial.peek() == '\r' || Serial.peek() == '\n'))
+    Serial.read();
+
   if (!Serial.available())
     return;
 
   char c = Serial.read();
+  if (c == '\r' || c == '\n')
+    return; // stray line ending with no command before it
+
   Serial.println(c);
   switch (c) {
   case '1':
@@ -164,9 +188,6 @@ void loop() {
     for (uint8_t i = 0; i < 4; i++)
       Serial.printf("%-10s %s\n", nodes[i].name, nodes[i].on ? "ON" : "OFF");
     break;
-  case '\r':
-  case '\n':
-    return; // ignore newlines after commands
   default:
     Serial.println("? (1-4, p, s)");
   }
