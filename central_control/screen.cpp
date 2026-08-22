@@ -358,13 +358,116 @@ void MyDisplay::showErrorBanner(const char *message) {
   display.display();
 }
 
+void MyDisplay::showErrorScreen(const SystemErrors &errors) {
+  display.clearDisplay();
+  display.fillRect(0, 0, 128, 11, SH110X_WHITE);
+  display.setTextColor(SH110X_BLACK, SH110X_WHITE);
+  display.setCursor(14, 2);
+  display.print("! SYSTEM FAULT !");
+
+  display.setTextColor(SH110X_WHITE, SH110X_BLACK);
+  int y = 16;
+  for (uint8_t i = 0; i < errors.count && i < 4; i++) {
+    display.setCursor(2, y);
+    switch (errors.codes[i]) {
+    case ERR_GATE_OFFLINE:
+      display.print("GATE OFFLINE");
+      break;
+    case ERR_POND_OFFLINE:
+      display.print("POND OFFLINE");
+      break;
+    case ERR_FOUNTAIN1_OFFLINE:
+      display.print("FOUNTN1 OFFLINE");
+      break;
+    case ERR_FOUNTAIN2_OFFLINE:
+      display.print("FOUNTN2 OFFLINE");
+      break;
+    case ERR_RTC_DEAD:
+      display.print("POND RTC DEAD");
+      break;
+    default:
+      break;
+    }
+    y += 10;
+  }
+  if (errors.count > 4) {
+    display.setCursor(2, y);
+    display.print("+ MORE");
+  }
+
+  // Footer hint
+  display.drawRect(0, 52, 128, 12, SH110X_WHITE);
+  display.setCursor(6, 55);
+  display.print("ANY BTN: DISMISS 60s");
+  display.display();
+}
+
 // ==========================================
 // InfoController Implementation
 // ==========================================
 
 InfoController::InfoController(MyDisplay &disp) : display(disp) {}
 
+// An error is hidden while within its dismiss window; it reappears once the
+// window expires if the underlying fault is still active.
+bool InfoController::isDismissed(ErrorCode code, unsigned long now) const {
+  if (code == ERR_NONE || code > ERR_RTC_DEAD)
+    return false;
+  unsigned long at = dismissedAt[code];
+  return at != 0 && (now - at) < DISMISS_TIMEOUT_MS;
+}
+
+void InfoController::tick(unsigned long now) {
+  if (screen != INFO_DEFAULT)
+    return;
+
+  SystemErrors errors;
+  radioManager.getSystemErrors(errors);
+
+  // Active, non-dismissed errors own the default screen.
+  bool anyVisible = false;
+  for (uint8_t i = 0; i < errors.count; i++) {
+    if (!isDismissed(errors.codes[i], now)) {
+      anyVisible = true;
+      break;
+    }
+  }
+
+  // Redraw only when the visible state changes (error screen vs conditions
+  // screen) — the OLED doesn't need continuous refreshes and redrawing every
+  // tick would cause flicker.
+  static bool lastShowedError = false;
+  if (anyVisible != lastShowedError) {
+    lastShowedError = anyVisible;
+    drawDefaultScreen();
+  }
+}
+
 void InfoController::drawDefaultScreen() {
+  SystemErrors errors;
+  radioManager.getSystemErrors(errors);
+
+  unsigned long now = millis();
+  bool anyVisible = false;
+  for (uint8_t i = 0; i < errors.count; i++) {
+    if (!isDismissed(errors.codes[i], now)) {
+      anyVisible = true;
+      break;
+    }
+  }
+
+  if (anyVisible) {
+    // Show only non-dismissed errors on the fault screen.
+    SystemErrors visible;
+    visible.count = 0;
+    for (uint8_t i = 0; i < errors.count && visible.count < 5; i++) {
+      if (!isDismissed(errors.codes[i], now))
+        visible.codes[visible.count++] = errors.codes[i];
+    }
+    display.showErrorScreen(visible);
+    return;
+  }
+
   CurrentConditions c;
   getCurrentConditions(c);
   display.showCurrentInformation(c.windSpeed, c.temperature, c.hours,
@@ -418,10 +521,23 @@ void InfoController::handleInput(uint8_t buttons) {
     return;
 
   switch (screen) {
-  case INFO_DEFAULT:
+  case INFO_DEFAULT: {
+    // If faults are visible, any button press dismisses them for a while
+    // instead of navigating away.
+    SystemErrors errors;
+    radioManager.getSystemErrors(errors);
+    unsigned long now = millis();
+    bool anyVisible = false;
+    for (uint8_t i = 0; i < errors.count; i++) {
+      if (!isDismissed(errors.codes[i], now)) {
+        dismissedAt[errors.codes[i]] = now;
+        anyVisible = true;
+      }
+    }
     screen = INFO_SELECT_DEVICE;
     display.showStatusViewSelectionScreen();
     break;
+  }
 
   case INFO_SELECT_DEVICE:
     switch (buttons) {
@@ -747,8 +863,9 @@ void App::loop() {
   if (millis() - lastPeriodicRefresh >= 500) {
     lastPeriodicRefresh = millis();
     if (currentMode == MODE_INFO && infoController.isDefaultScreen()) {
-      infoController.drawDefaultScreen(); // Updates live clock/wind view
-                                          // immediately
+      // Redraws the conditions view AND shows/hides the error screen as
+      // faults come and go (tick() decides which view is appropriate).
+      infoController.tick(millis());
     }
   }
 

@@ -59,3 +59,20 @@ extern void setDeviceSettings(DeviceID id, const DeviceSettings &in);
 extern void getCurrentConditions(CurrentConditions &out);
 extern void updateConditionsFromPond(int windSpeed, float temperature,
                                      int hours, int minutes);
+
+// --- System-wide errors (for the UI error screen) ---
+enum ErrorCode : uint8_t {
+  ERR_NONE = 0,
+  ERR_GATE_OFFLINE,
+  ERR_POND_OFFLINE,
+  ERR_FOUNTAIN1_OFFLINE,
+  ERR_FOUNTAIN2_OFFLINE,
+  ERR_RTC_DEAD, // pond node's RTC failed; schedules unreliable
+};
+
+// Snapshot of currently active system errors. Collected by RadioManager on
+// Core 1's data; consumed by the Core 0 UI.
+struct SystemErrors {
+  ErrorCode codes[5];
+  uint8_t count = 0;
+};

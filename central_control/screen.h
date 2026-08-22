@@ -48,6 +48,7 @@ public:
   void showTimeIntervalSetting(String label, int startHour, int startMin,
                                int endHour, int endMin, int highlightTarget);
   void showErrorBanner(const char *message); // bottom-row warning banner
+  void showErrorScreen(const SystemErrors &errors); // full-screen fault view
 
 private:
   Adafruit_SH1107 display = Adafruit_SH1107(64, 128, &Wire);
@@ -61,6 +62,9 @@ public:
   void handleInput(uint8_t buttons);
   void resetToDefault();
   void drawDefaultScreen();
+  // Called every UI loop tick: refreshes the default/error screen so the
+  // error view appears/disappears live as faults come and go.
+  void tick(unsigned long now);
   bool isDefaultScreen() const { return screen == INFO_DEFAULT; }
 
 private:
@@ -68,6 +72,12 @@ private:
   InfoScreen screen = INFO_DEFAULT;
   DeviceID selectedDevice = DEVICE_GATE;
 
+  // Per-error dismiss timestamps (indexed by ErrorCode); errors reappear
+  // after the dismiss timeout if the fault persists.
+  unsigned long dismissedAt[6] = {0, 0, 0, 0, 0, 0};
+  static constexpr unsigned long DISMISS_TIMEOUT_MS = 60000;
+
+  bool isDismissed(ErrorCode code, unsigned long now) const;
   void drawDeviceStatus();
 };
 

@@ -428,3 +428,26 @@ void RadioManager::runPollCycle() {
   pollRelayNode(NODE_FOUNTAIN2, fountain2Status);
   decideAndSendCommands();
 }
+
+// Snapshot of active system errors for the UI (thread-safe). Node timeouts
+// are listed first — they mean devices are uncontrolled; RTC death is last
+// because it only degrades schedule quality. ERR_NONE entries fill the
+// remainder of the array when fewer than 5 errors are active.
+void RadioManager::getSystemErrors(SystemErrors &out) {
+  mutex_enter_blocking(&nodeStatusMutex);
+  out.count = 0;
+  for (uint8_t i = 0; i < 5; i++)
+    out.codes[i] = ERR_NONE;
+
+  if (gateStatus.error != NODE_OK)
+    out.codes[out.count++] = ERR_GATE_OFFLINE;
+  if (pondStatus.error != NODE_OK)
+    out.codes[out.count++] = ERR_POND_OFFLINE;
+  if (fountain1Status.error != NODE_OK)
+    out.codes[out.count++] = ERR_FOUNTAIN1_OFFLINE;
+  if (fountain2Status.error != NODE_OK)
+    out.codes[out.count++] = ERR_FOUNTAIN2_OFFLINE;
+  if (!pondStatus.rtcOk && pondStatus.error == NODE_OK)
+    out.codes[out.count++] = ERR_RTC_DEAD;
+  mutex_exit(&nodeStatusMutex);
+}

@@ -20,6 +20,7 @@ public:
   void getPondNodeStatus(PondNodeStatus &out);
   void getGateStatus(NodeStatus &out);
   void getFountainStatus(uint8_t index, NodeStatus &out);
+  void getSystemErrors(SystemErrors &out);
   static bool computeDesiredState(const DeviceSettings &s, bool windStale,
                                   int windSpeed, int hours, int minutes);
 
