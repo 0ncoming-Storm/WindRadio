@@ -83,6 +83,24 @@ void RadioManager::loop() {
   // core flat-out.
   unsigned long remaining = POLL_CYCLE_MS - (now - lastPollCycle);
   delay(min(remaining, 250UL));
+
+#if RADIO_DEBUG
+  // Heartbeat: proves Core 1's radio loop is alive between cycles and dumps
+  // per-node health so a hang vs. an offline-node is obvious on serial.
+  static unsigned long lastHeartbeat = 0;
+  if (now - lastHeartbeat >= HEARTBEAT_MS) {
+    lastHeartbeat = now;
+    mutex_enter_blocking(&nodeStatusMutex);
+    RLOG("[%lu] alive: pond(err=%u miss=%u rtc=%d wind=%d) "
+         "gate(err=%u miss=%u) f1(err=%u miss=%u) f2(err=%u miss=%u)\n",
+         now, pondStatus.error, pondStatus.missedPolls,
+         (int)pondStatus.rtcOk, pondStatus.windSpeed, gateStatus.error,
+         gateStatus.missedPolls, fountain1Status.error,
+         fountain1Status.missedPolls, fountain2Status.error,
+         fountain2Status.missedPolls);
+    mutex_exit(&nodeStatusMutex);
+  }
+#endif
 }
 
 void RadioManager::getPondNodeStatus(PondNodeStatus &out) {

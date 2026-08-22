@@ -35,6 +35,7 @@ private:
   unsigned long lastPollCycle = 0;
   const unsigned long POLL_CYCLE_MS = 30000;   // poll every 30s
   const unsigned long POLL_TIMEOUT_MS = 500;   // per-node response budget
+  const unsigned long HEARTBEAT_MS = 5000;     // serial alive/dump interval
   const uint8_t POLL_ATTEMPTS = 3;             // app-level retransmits per exchange
 
   // Low-level radio helpers
