@@ -28,7 +28,7 @@ all: compile
 # Compiles only if sources changed since last successful build
 compile: $(STAMP)
 
-LIBFLAGS = --library $(CURDIR)/common
+LIBFLAGS = --library $(CURDIR)/common --library $(CURDIR)/lib/RFM69_LowPowerLab
 
 # Optimization overrides to inject -O3 flag
 O3_FLAGS = --build-property "compiler.c.extra_flags=-O3" --build-property "compiler.cpp.extra_flags=-O3"

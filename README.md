@@ -93,9 +93,13 @@ on-device menu (buttons A/B/C; hold A+B to enter menu).
 
 ## Notes / gotchas
 
-- The RFM69 library is locally patched (`~/Arduino/libraries/RFM69_LowPowerLab`):
-  bounded ModeReady/PacketSent/RSSI waits, `lastTxOk` latch, IRQ attach/detach
-  helpers. Reinstalling the library from Library Manager wipes these fixes.
+- **The RFM69 library is vendored in this repo** at `lib/RFM69_LowPowerLab/`,
+  locally patched: bounded ModeReady/PacketSent/RSSI waits, `lastTxOk` TX
+  verification latch, and IRQ attach/detach helpers. The Makefile compiles
+  against the in-repo copy, so Library Manager updates can't break the build.
+  If you reinstall the library system-wide (`~/Arduino/libraries/`), either
+  re-copy from `lib/` or delete the installed copy — an unpatched version
+  WILL hang the firmware.
 - The RFM69 constructor must NOT be given a pin number as 4th argument — it's
   an `SPIClass*`. Passing GPIO 21 there silently corrupted memory (past bug).
 - HCW modules draw ~130 mA TX spikes; bench powering from a laptop USB port
