@@ -24,7 +24,7 @@
 #define MY_NODE_ID NODE_FOUNTAIN1
 #endif
 
-#define RELAY_PIN 13
+#define RELAY_PIN 9
 
 // Watchdog period. Generous: the loop only blocks for radio retries.
 #define WATCHDOG_TIMEOUT_MS 8000

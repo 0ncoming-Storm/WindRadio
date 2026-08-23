@@ -83,6 +83,24 @@ void RadioManager::loop() {
   // core flat-out.
   unsigned long remaining = POLL_CYCLE_MS - (now - lastPollCycle);
   delay(min(remaining, 250UL));
+
+#if RADIO_DEBUG
+  // Heartbeat: proves Core 1's radio loop is alive between cycles and dumps
+  // per-node health so a hang vs. an offline-node is obvious on serial.
+  static unsigned long lastHeartbeat = 0;
+  if (now - lastHeartbeat >= HEARTBEAT_MS) {
+    lastHeartbeat = now;
+    mutex_enter_blocking(&nodeStatusMutex);
+    RLOG("[%lu] alive: pond(err=%u miss=%u rtc=%d wind=%d) "
+         "gate(err=%u miss=%u) f1(err=%u miss=%u) f2(err=%u miss=%u)\n",
+         now, pondStatus.error, pondStatus.missedPolls,
+         (int)pondStatus.rtcOk, pondStatus.windSpeed, gateStatus.error,
+         gateStatus.missedPolls, fountain1Status.error,
+         fountain1Status.missedPolls, fountain2Status.error,
+         fountain2Status.missedPolls);
+    mutex_exit(&nodeStatusMutex);
+  }
+#endif
 }
 
 void RadioManager::getPondNodeStatus(PondNodeStatus &out) {
@@ -427,4 +445,27 @@ void RadioManager::runPollCycle() {
   pollRelayNode(NODE_FOUNTAIN1, fountain1Status);
   pollRelayNode(NODE_FOUNTAIN2, fountain2Status);
   decideAndSendCommands();
+}
+
+// Snapshot of active system errors for the UI (thread-safe). Node timeouts
+// are listed first — they mean devices are uncontrolled; RTC death is last
+// because it only degrades schedule quality. ERR_NONE entries fill the
+// remainder of the array when fewer than 5 errors are active.
+void RadioManager::getSystemErrors(SystemErrors &out) {
+  mutex_enter_blocking(&nodeStatusMutex);
+  out.count = 0;
+  for (uint8_t i = 0; i < 5; i++)
+    out.codes[i] = ERR_NONE;
+
+  if (gateStatus.error != NODE_OK)
+    out.codes[out.count++] = ERR_GATE_OFFLINE;
+  if (pondStatus.error != NODE_OK)
+    out.codes[out.count++] = ERR_POND_OFFLINE;
+  if (fountain1Status.error != NODE_OK)
+    out.codes[out.count++] = ERR_FOUNTAIN1_OFFLINE;
+  if (fountain2Status.error != NODE_OK)
+    out.codes[out.count++] = ERR_FOUNTAIN2_OFFLINE;
+  if (!pondStatus.rtcOk && pondStatus.error == NODE_OK)
+    out.codes[out.count++] = ERR_RTC_DEAD;
+  mutex_exit(&nodeStatusMutex);
 }
