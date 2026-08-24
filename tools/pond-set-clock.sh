@@ -3,8 +3,9 @@
 #
 # Usage: ./pond-set-clock.sh [serial-port]
 #
-# The PC clock is NTP-synced (systemd-timesyncd), so its epoch is authoritative.
-# The RTC holds UTC; the central node converts to local time for display only.
+# Flash rtc-set-clock.ino to the pond board first. The PC clock is
+# NTP-synced (systemd-timesyncd), so its epoch is authoritative.
+# The RTC holds UTC; the central node converts to local time for display.
 
 set -euo pipefail
 
@@ -15,20 +16,14 @@ echo "[*] Reading PC clock (assumed NTP-synced)..."
 EPOCH=$(date +%s)
 echo "[*] UTC epoch: $EPOCH ($(date -u '+%Y-%m-%d %H:%M:%S UTC'))"
 
-# Small delay so the timestamp is fresh when it lands on the RTC.
-sleep 1
-EPOCH=$((EPOCH + 2))
-
 echo "[*] Opening $PORT at $BAUD..."
-# stty raw 8N1; the Feather's USB CDC doesn't need DTR tricks.
 stty -F "$PORT" "$BAUD" raw -echo -crtscts
 
 # Drain anything pending.
 timeout 0.5 cat "$PORT" > /dev/null 2>&1 || true
 
-echo "[*] Sending SETCLOCK request..."
-printf 'SETCLOCK\n' > "$PORT"
-sleep 0.5
+# Add ~2s so the timestamp is fresh when it lands on the RTC.
+EPOCH=$((EPOCH + 2))
 
 echo "[*] Sending T$EPOCH..."
 printf 'T%s\n' "$EPOCH" > "$PORT"
@@ -37,11 +32,11 @@ sleep 1
 echo "[*] Reading response (5s)..."
 RESP=$(timeout 5 cat "$PORT" || true)
 echo "----- device output -----"
-echo "$RESP" | tail -20
+echo "$RESP" | tail -10
 echo "-------------------------"
 
-if echo "$RESP" | grep -q "RTC SET"; then
-  echo "[OK] Clock set."
+if echo "$RESP" | grep -q "ECHO: T$EPOCH"; then
+  echo "[OK] Clock set and confirmed."
 else
   echo "[FAIL] No confirmation from device." >&2
   exit 1
