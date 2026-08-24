@@ -90,6 +90,11 @@ static void replyStatus() {
 
   pkt.pondStatus.hours = hours;
   pkt.pondStatus.minutes = minutes;
+  if (rtcOk) {
+    DateTime now = rtc.now();
+    pkt.pondStatus.month = now.month();
+    pkt.pondStatus.day = now.day();
+  }
   pkt.pondStatus.windSpeed = (int)mapWindSpeed(analogRead(WIND_SENSOR_PIN));
   pkt.pondStatus.temperature = temperature;
   pkt.pondStatus.pumpState = pumpState;

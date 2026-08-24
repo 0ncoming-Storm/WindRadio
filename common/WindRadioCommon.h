@@ -70,6 +70,8 @@ struct WindRadioPacket {
     struct { // PKT_POND_STATUS
       uint8_t hours;
       uint8_t minutes;
+      uint8_t month;  // 1-12; needed by the base for DST conversion
+      uint8_t day;    // 1-31
       int windSpeed;
       float temperature;
       RelayState pumpState;

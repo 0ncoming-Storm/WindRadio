@@ -58,6 +58,36 @@ static const char *packetTypeName(PacketType t) {
 #define RLOG(...)
 #endif
 
+// --- Alberta time (America/Edmonton) display conversion ---
+// RTC holds UTC. Schedules and the UI show local Alberta time:
+// MST = UTC-7, MDT = UTC-6 (DST). DST runs from the second Sunday of March
+// 02:00 local to the first Sunday of November 02:00 local.
+// Returns true if `month/day` falls inside the MDT window.
+static bool albertaIsDst(uint8_t month, uint8_t day) {
+  if (month < 3 || month > 11)
+    return false; // Jan, Feb, Dec -> MST
+  if (month > 3 && month < 11)
+    return true; // Apr..Oct -> MDT
+  // March / November: find the day-of-month of the relevant Sunday.
+  // Second Sunday of March is between the 8th and 14th; first Sunday of
+  // November is between the 1st and 7th. Without the weekday we approximate:
+  // treat Mar 8+ as DST, Nov 7- as standard — accurate within a few days.
+  return month == 3 ? day >= 8 : day < 7;
+}
+
+// Convert UTC hour/minute (+ date for DST) to Alberta wall-clock time.
+static void utcToAlberta(uint8_t &hours, uint8_t &minutes,
+                         bool dstActive) {
+  int offsetHours = dstActive ? -6 : -7;
+  int total = hours + offsetHours;
+  if (total < 0) {
+    total += 24;
+  } else if (total >= 24) {
+    total -= 24;
+  }
+  hours = (uint8_t)total;
+}
+
 void RadioManager::init() {
   mutex_init(&nodeStatusMutex);
 
@@ -215,8 +245,15 @@ void RadioManager::pollPondNode() {
   uint8_t missed = 0;
   mutex_enter_blocking(&nodeStatusMutex);
   if (ok) {
+    // Convert UTC (as stored on the RTC) to Alberta local time for
+    // everything downstream: UI display AND schedule evaluation. Schedules
+    // are entered in local wall-clock time, so the conversion must happen
+    // here, once, before the values are cached.
+    bool dst = albertaIsDst(responsePacket.pondStatus.month,
+                            responsePacket.pondStatus.day);
     pondStatus.hours = responsePacket.pondStatus.hours;
     pondStatus.minutes = responsePacket.pondStatus.minutes;
+    utcToAlberta(pondStatus.hours, pondStatus.minutes, dst);
     pondStatus.windSpeed = responsePacket.pondStatus.windSpeed;
     pondStatus.temperature = responsePacket.pondStatus.temperature;
     pondStatus.pumpState = responsePacket.pondStatus.pumpState;

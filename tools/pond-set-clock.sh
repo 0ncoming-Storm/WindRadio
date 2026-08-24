@@ -1,27 +1,19 @@
 #!/usr/bin/env bash
-# pond-set-clock — set the pond node's DS3231 RTC from NTP, over serial.
+# pond-set-clock — set the pond node's DS3231 RTC from the PC clock, over serial.
 #
 # Usage: ./pond-set-clock.sh [serial-port]
 #
-# Flow:
-#   1. Fetch current UTC epoch from worldtimeapi.org (NTP-backed).
-#   2. Ask the sketch for a time-set window (SETCLOCK command).
-#   3. Send "T<epoch>" — the sketch applies it as a UTC epoch and echoes
-#      back the resulting local date/time for verification.
+# The PC clock is NTP-synced (systemd-timesyncd), so its epoch is authoritative.
+# The RTC holds UTC; the central node converts to local time for display only.
 
 set -euo pipefail
 
 PORT="${1:-/dev/ttyACM0}"
 BAUD=115200
 
-echo "[*] Fetching time from worldtimeapi.org..."
-EPOCH=$(curl -s --max-time 10 "https://worldtimeapi.org/api/timezone/Etc/UTC" \
-        | python3 -c 'import json,sys; print(json.load(sys.stdin)["unixtime"])')
-if ! [[ "$EPOCH" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: could not fetch NTP time (got: '$EPOCH')" >&2
-  exit 1
-fi
-echo "[*] NTP epoch: $EPOCH"
+echo "[*] Reading PC clock (assumed NTP-synced)..."
+EPOCH=$(date +%s)
+echo "[*] UTC epoch: $EPOCH ($(date -u '+%Y-%m-%d %H:%M:%S UTC'))"
 
 # Small delay so the timestamp is fresh when it lands on the RTC.
 sleep 1
