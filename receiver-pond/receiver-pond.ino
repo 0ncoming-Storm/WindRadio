@@ -100,10 +100,57 @@ static void replyStatus() {
                     STATUS_RETRY_DELAY_MS);
 }
 
+// --- Serial clock setting (bench tool, POND_DEBUG builds only) ---
+// Protocol: host sends "T<epoch>" where <epoch> is a UTC unix timestamp.
+// The sketch applies it to the DS3231 and echoes the resulting LOCAL
+// date/time for verification. The host is responsible for converting to
+// the desired timezone before sending.
+#if POND_DEBUG
+static uint32_t pendingEpoch = 0;      // epoch awaiting confirmation
+static unsigned long setClockArmedAt = 0;
+static const unsigned long SETCLOCK_WINDOW_MS = 10000;
+
+static void handleSetClock() {
+  while (Serial.available()) {
+    char c = Serial.read();
+
+    if (c == 'T' || c == 't') { // start of T<epoch> command
+      String num;
+      unsigned long start = millis();
+      while ((millis() - start) < 3000) {
+        if (!Serial.available()) {
+          delay(1);
+          continue;
+        }
+        char d = Serial.read();
+        if (d == '\n' || d == '\r')
+          break;
+        if (isDigit(d))
+          num += d;
+      }
+      if (num.length() == 0) {
+        Serial.println("SETCLOCK ERR: no digits after T");
+        return;
+      }
+      pendingEpoch = (uint32_t)num.toInt();
+      rtc.adjust(DateTime(pendingEpoch));
+      DateTime now = rtc.now();
+      Serial.printf("RTC SET: %04u-%02u-%02u %02u:%02u:%02u\n",
+                    (unsigned)now.year(), (unsigned)now.month(),
+                    (unsigned)now.day(), (unsigned)now.hour(),
+                    (unsigned)now.minute(), (unsigned)now.second());
+      return;
+    }
+  }
+}
+#endif // POND_DEBUG
+
 void setup() {
   pinMode(PUMP_RELAY_PIN, OUTPUT);
   digitalWrite(PUMP_RELAY_PIN, LOW); // pump always starts OFF
-
+   while (!Serial) {
+    ; // Do nothing, just loop
+  }
   Wire.begin();
   rtcOk = rtc.begin();
   if (!rtcOk) {
@@ -126,6 +173,22 @@ void setup() {
 
 void loop() {
   rp2040.wdt_reset();
+
+#if POND_DEBUG
+  // Bench clock-setting: watch serial for T<epoch> commands. Only active in
+  // debug builds — deployed firmware ignores serial entirely.
+  if (Serial.available() > 0) {
+    char peeked = (char)Serial.peek();
+    if (peeked == 'T' || peeked == 't') {
+      handleSetClock();
+      return; // done this loop, radio next time
+    }
+    // Drain other stray characters so they don't accumulate.
+    while (Serial.available())
+      Serial.read();
+  }
+#endif
+
   // Idle sleep: receivePacket() returns in microseconds when no packet is
   // waiting, so without this the core would spin at 100% CPU (and run hot)
   // polling the radio over SPI. Worst-case command latency is ~2ms.
