@@ -433,14 +433,10 @@ void InfoController::tick(unsigned long now) {
     }
   }
 
-  // Redraw only when the visible state changes (error screen vs conditions
-  // screen) — the OLED doesn't need continuous refreshes and redrawing every
-  // tick would cause flicker.
-  static bool lastShowedError = false;
-  if (anyVisible != lastShowedError) {
-    lastShowedError = anyVisible;
-    drawDefaultScreen();
-  }
+  // Redraw unconditionally: the conditions view shows a live clock/wind/temp
+  // and the error view must reappear when its dismiss window lapses. Called
+  // at ~2Hz from App::loop(), which is gentle on the OLED and flicker-free.
+  drawDefaultScreen();
 }
 
 void InfoController::drawDefaultScreen() {
