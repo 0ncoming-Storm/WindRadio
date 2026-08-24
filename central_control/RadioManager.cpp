@@ -291,10 +291,15 @@ void RadioManager::pollPondNode() {
   // but decideAndSendCommands() treats any rtcOk==false as fully stale to be
   // safe (fail-safe = everything OFF, same as a missed pond).
   if (ok && responsePacket.pondStatus.rtcOk) {
-    updateConditionsFromPond(responsePacket.pondStatus.windSpeed,
-                             responsePacket.pondStatus.temperature,
-                             responsePacket.pondStatus.hours,
-                             responsePacket.pondStatus.minutes);
+    // Feed the already-converted local time from pondStatus (not the raw
+    // packet — those are UTC).
+    mutex_enter_blocking(&nodeStatusMutex);
+    int localHours = pondStatus.hours;
+    int localMinutes = pondStatus.minutes;
+    int localWind = pondStatus.windSpeed;
+    float localTemp = pondStatus.temperature;
+    mutex_exit(&nodeStatusMutex);
+    updateConditionsFromPond(localWind, localTemp, localHours, localMinutes);
   }
 }
 
