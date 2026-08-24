@@ -24,6 +24,9 @@
 #define PUMP_RELAY_PIN 13
 #define WIND_SENSOR_PIN A0
 
+// Set to 0 to silence serial debug (clock dumps etc).
+#define POND_DEBUG 1
+
 // Watchdog period. Generous: the loop only blocks for radio retries.
 #define WATCHDOG_TIMEOUT_MS 8000
 
@@ -55,13 +58,35 @@ static void replyStatus() {
   pkt.type = PKT_POND_STATUS;
 
   uint8_t hours = 0, minutes = 0;
+  uint8_t seconds = 0;
   float temperature = 0.0f;
   if (rtcOk) {
     DateTime now = rtc.now();
     hours = now.hour();
     minutes = now.minute();
+    seconds = now.second();
     temperature = rtc.getTemperature();
   }
+
+#if POND_DEBUG
+  // Clock debug: full timestamp + sanity checks on every status reply.
+  if (rtcOk) {
+    DateTime now = rtc.now();
+    bool sane = now.year() >= 2024 && now.year() <= 2099 &&
+                now.month() >= 1 && now.month() <= 12 &&
+                now.day() >= 1 && now.day() <= 31 &&
+                now.hour() < 24 && now.minute() < 60 && now.second() < 60;
+    Serial.printf("[%lu] RTC: %04u-%02u-%02u %02u:%02u:%02u %s\n", millis(),
+                  (unsigned)now.year(), (unsigned)now.month(),
+                  (unsigned)now.day(), (unsigned)now.hour(),
+                  (unsigned)now.minute(), (unsigned)now.second(),
+                  sane ? "ok" : "OUT OF RANGE");
+    if (!sane)
+      Serial.println("RTC: WARNING - date/time implausible, clock may be unset");
+  } else {
+    Serial.printf("[%lu] RTC: DEAD - reporting zeros\n", millis());
+  }
+#endif
 
   pkt.pondStatus.hours = hours;
   pkt.pondStatus.minutes = minutes;
@@ -81,8 +106,17 @@ void setup() {
 
   Wire.begin();
   rtcOk = rtc.begin();
-  if (!rtcOk)
+  if (!rtcOk) {
     Serial.println("RTC failed; reporting zeroed time/temp");
+  } else {
+#if POND_DEBUG
+    DateTime now = rtc.now();
+    Serial.printf("RTC ok at boot: %04u-%02u-%02u %02u:%02u:%02u\n",
+                  (unsigned)now.year(), (unsigned)now.month(),
+                  (unsigned)now.day(), (unsigned)now.hour(),
+                  (unsigned)now.minute(), (unsigned)now.second());
+#endif
+  }
 
   radioSetup(NODE_POND);
   Serial.begin(115200);
