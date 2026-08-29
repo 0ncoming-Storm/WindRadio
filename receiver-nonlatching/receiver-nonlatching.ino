@@ -51,8 +51,10 @@ void setup() {
   pinMode(RELAY_PIN, OUTPUT);
   digitalWrite(RELAY_PIN, LOW); // pumps always start OFF
 
-  radioSetup(MY_NODE_ID);
+  // Serial FIRST so the radio init result below is actually visible.
   Serial.begin(115200);
+
+  radioSetup(MY_NODE_ID);
 
   rp2040.wdt_begin(WATCHDOG_TIMEOUT_MS);
 }
@@ -64,6 +66,14 @@ void loop() {
   // polling the radio over SPI. Worst-case command latency is ~2ms.
   delay(2);
 
+  // Fail-safe: no base poll for 6+ minutes means the base is dead or wedged —
+  // stop the pump. The state check makes this act ONCE per silence period.
+  if (basePollExpired() && relayState != RELAY_OFF) {
+    applyRelay(false);
+    Serial.printf("[%lu] FAILSAFE: no base poll for 6+ min - fountain OFF\n",
+                  millis());
+  }
+
   WindRadioPacket pkt;
   if (!receivePacket(pkt))
     return;
@@ -72,12 +82,14 @@ void loop() {
 
   switch (pkt.type) {
   case PKT_POLL_REQUEST:
+    if (pkt.fromNode == NODE_MAIN)
+      markBasePollSeen(); // liveness for the 6-minute fail-safe above
     replyStatus();
     break;
 
   case PKT_SET_RELAY:
     applyRelay(pkt.setRelay.relayOn);
-    // Protocol v5: no separate ACK packet. The freshly-applied relay state is
+    // Protocol v6: no separate ACK packet. The freshly-applied relay state is
     // the confirmation — reply with a status snapshot (retried).
     replyStatus();
     break;

@@ -53,18 +53,82 @@ static float mapWindSpeed(int raw) {
   return (voltage - 0.4f) / (2.0f - 0.4f) * 32.4f;
 }
 
+// --- Wind sampling / filtering ---
+// The anemometer feeds a SAFETY decision, so the reported value must
+// represent recent wind, not one noisy instant. Pipeline:
+//   * every 100 ms take the MEDIAN of 3 ADC samples (rejects single-shot
+//     spikes from vibration / electrical noise),
+//   * keep a 30-second rolling window of those filtered samples,
+//   * report the window MAX.
+// The peak is the conservative choice for shutoff logic (a gust that
+// outlasts one sample tick is always captured; under-reporting wind would
+// keep the gate open in gusts), and a window max only changes when the
+// maximum changes — smooth, no per-sample jitter on the base's display.
+#define WIND_SAMPLE_MS 100
+#define WIND_WINDOW_MS 30000
+#define WIND_WINDOW_SAMPLES (WIND_WINDOW_MS / WIND_SAMPLE_MS)
+
+static uint8_t windWindow[WIND_WINDOW_SAMPLES];
+static uint16_t windWindowIdx = 0;
+
+static int medianOf3(int a, int b, int c) {
+  // Three conditional swaps sort the triple ascending (a <= b <= c).
+  if (a > b) {
+    int t = a;
+    a = b;
+    b = t;
+  }
+  if (b > c) {
+    int t = b;
+    b = c;
+    c = t;
+  }
+  if (a > b) {
+    int t = a;
+    a = b;
+    b = t;
+  }
+  return b; // median
+}
+
+// Call from loop(): takes one filtered sample when due.
+static void windTick() {
+  static unsigned long lastSampleMs = 0;
+  unsigned long now = millis();
+  if (now - lastSampleMs < WIND_SAMPLE_MS)
+    return;
+  lastSampleMs = now;
+  int med = medianOf3(analogRead(WIND_SENSOR_PIN),
+                      analogRead(WIND_SENSOR_PIN),
+                      analogRead(WIND_SENSOR_PIN));
+  float kmh = mapWindSpeed(med);
+  if (kmh > 255.0f)
+    kmh = 255.0f; // window is uint8; the current map caps far below this
+  windWindow[windWindowIdx] = (uint8_t)kmh;
+  windWindowIdx = (uint16_t)((windWindowIdx + 1) % WIND_WINDOW_SAMPLES);
+}
+
+// Max over the rolling window (0 until the first samples land).
+static int currentWindKmh() {
+  int maxKmh = 0;
+  for (uint16_t i = 0; i < WIND_WINDOW_SAMPLES; i++)
+    if (windWindow[i] > maxKmh)
+      maxKmh = windWindow[i];
+  return maxKmh;
+}
+
 static void replyStatus() {
   WindRadioPacket pkt;
   pkt.type = PKT_POND_STATUS;
 
   uint8_t hours = 0, minutes = 0;
-  uint8_t seconds = 0;
+  uint8_t weekday = 0;
   float temperature = 0.0f;
   if (rtcOk) {
     DateTime now = rtc.now();
     hours = now.hour();
     minutes = now.minute();
-    seconds = now.second();
+    weekday = now.dayOfTheWeek(); // 0=Sunday..6=Saturday (base DST test)
     temperature = rtc.getTemperature();
   }
 
@@ -94,8 +158,11 @@ static void replyStatus() {
     DateTime now = rtc.now();
     pkt.pondStatus.month = now.month();
     pkt.pondStatus.day = now.day();
+    pkt.pondStatus.weekday = weekday;
   }
-  pkt.pondStatus.windSpeed = (int)mapWindSpeed(analogRead(WIND_SENSOR_PIN));
+  // Filtered value: median-of-3 @100ms samples, max over the last 30 s
+  // (see windTick / currentWindKmh above).
+  pkt.pondStatus.windSpeed = currentWindKmh();
   pkt.pondStatus.temperature = temperature;
   pkt.pondStatus.pumpState = pumpState;
   pkt.pondStatus.rtcOk = rtcOk;
@@ -108,6 +175,9 @@ static void replyStatus() {
 void setup() {
   pinMode(PUMP_RELAY_PIN, OUTPUT);
   digitalWrite(PUMP_RELAY_PIN, LOW); // pump always starts OFF
+
+  // Serial FIRST so the RTC/radio init results below are actually visible.
+  Serial.begin(115200);
 
   Wire.begin();
   rtcOk = rtc.begin();
@@ -124,7 +194,6 @@ void setup() {
   }
 
   radioSetup(NODE_POND);
-  Serial.begin(115200);
 
   rp2040.wdt_begin(WATCHDOG_TIMEOUT_MS);
 }
@@ -137,6 +206,16 @@ void loop() {
   // polling the radio over SPI. Worst-case command latency is ~2ms.
   delay(2);
 
+  windTick(); // keep the filtered wind sample stream fresh
+
+  // Fail-safe: no base poll for 6+ minutes means the base is dead or wedged.
+  // The state check makes this act ONCE per silence period, not every loop.
+  if (basePollExpired() && pumpState != RELAY_OFF) {
+    applyPump(false);
+    Serial.printf("[%lu] FAILSAFE: no base poll for 6+ min - pump OFF\n",
+                  millis());
+  }
+
   WindRadioPacket pkt;
   if (!receivePacket(pkt))
     return;
@@ -145,12 +224,14 @@ void loop() {
 
   switch (pkt.type) {
   case PKT_POLL_REQUEST:
+    if (pkt.fromNode == NODE_MAIN)
+      markBasePollSeen(); // liveness for the 6-minute fail-safe above
     replyStatus();
     break;
 
   case PKT_SET_POND:
     applyPump(pkt.setRelay.relayOn);
-    // Protocol v5: no separate ACK packet. The freshly-applied pump state is
+    // Protocol v6: no separate ACK packet. The freshly-applied pump state is
     // the confirmation — reply with a status snapshot (retried).
     replyStatus();
     break;

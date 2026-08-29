@@ -14,7 +14,10 @@
 // retransmits plus the rule that every request is answered with a data packet.
 // v5: PKT_ACK removed entirely — commands are confirmed by a status packet too,
 // and status replies are sent with retries.
-#define PROTOCOL_VERSION 5
+// v6: PKT_POND_STATUS carries the RTC weekday so the base's DST test is exact
+//     (second Sunday of March / first Sunday of November). Wire format
+//     changed — all nodes must be flashed from the same tree.
+#define PROTOCOL_VERSION 6
 
 // --- Relay State (wire format) ---
 // Latching relays (e.g. the gate) keep their position through power loss,
@@ -72,6 +75,9 @@ struct WindRadioPacket {
       uint8_t minutes;
       uint8_t month;  // 1-12; needed by the base for DST conversion
       uint8_t day;    // 1-31
+      // 0=Sunday..6=Saturday, from the RTC. Lets the base pin the exact DST
+      // transition dates (weekday + date, no year needed).
+      uint8_t weekday;
       int windSpeed;
       float temperature;
       RelayState pumpState;
@@ -111,7 +117,20 @@ void sendPacketRetried(uint8_t toNodeId, const WindRadioPacket &pkt,
 // level — replies are the caller's decision.
 bool receivePacket(WindRadioPacket &outPkt);
 
-// Send a custom application-level ACK confirming that `ackedType` was
-// received and fully processed (nodes acknowledge commands only after
-// acting on them).
+// --- Base-Liveness Fail-Safe (all receiver nodes) ---
+// The base polls every 30 s and its wind-based shutoffs only run while the
+// base is alive. If the base dies or wedges, relays must not keep running
+// unattended: each receiver tracks the last PKT_POLL_REQUEST from the base
+// and shuts its relay off after this much silence (6 minutes = 12 missed
+// polls). Latching nodes act once on the transition, so coils are never
+// re-pulsed while the fail-safe stays active.
+#define BASE_POLL_TIMEOUT_MS 360000
+
+// Call whenever a PKT_POLL_REQUEST from NODE_MAIN is received.
+void markBasePollSeen();
+
+// True if no base poll has been seen for BASE_POLL_TIMEOUT_MS. The window
+// is counted from boot (last-seen starts at 0), so a node that comes up
+// and never hears the base fails safe after 6 minutes as well.
+bool basePollExpired();
 

@@ -1,11 +1,17 @@
+# WindRadio — clangd configuration.
+#
+# Preferred path: run `make node=<node> compile` once. The Makefile generates
+# compile_commands.json at the repo root (via --only-compilation-database)
+# with the full per-machine ARM toolchain flags, and clangd picks it up
+# automatically — no extra config needed.
+#
+# CompileFlags below is the fallback for before compile_commands.json exists:
+# tell clangd to INFER flags as if the ARM EABI compiler were on PATH (it
+# doesn't have to be — inference is best-effort) instead of assuming the
+# host compiler, which pulls in conflicting stdlib headers.
+#
+# NOTE: previously this file pinned an absolute toolchain path from one
+# developer's machine (/home/storm/.arduino15/...), which broke navigation
+# for everyone else. Do not add absolute paths here again.
 CompileFlags:
-  Compiler: /home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/bin/arm-none-eabi-g++
-  Add:
-    - "-target"
-    - "arm-none-eabi"
-    - "-isystem"
-    - "/home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include/c++/14.3.0/"
-    - "-isystem"
-    - "/home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include/c++/14.3.0/arm-none-eabi"
-    - "-isystem"
-    - "/home/storm/.arduino15/packages/rp2040/tools/pqt-gcc/4.1.0-1aec55e/arm-none-eabi/include"
+  Compiler: arm-none-eabi-g++

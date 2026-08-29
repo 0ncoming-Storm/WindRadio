@@ -72,6 +72,12 @@ void setup() {
   mutex_init(&currentConditionsMutex);
   radioManager.init(); // Initializes radio manager mutexes internally
   Serial.begin(115200);
+  // !!! DEPLOYMENT: this unbounded wait blocks boot until a USB host is
+  // connected — on this core `!Serial` is true while the USB CDC link is
+  // down, and Core 1 cannot start either (it waits on core0ReadyG).
+  // Intentional for bench work so serial is ready before any output.
+  // Before field deployment, remove it or bound it, e.g.:
+  //   while (!Serial && millis() < 5000) ;
   while (!Serial) {
     ; // Do nothing, just loop
   }

@@ -60,8 +60,10 @@ void setup() {
   digitalWrite(RELAY_SET_PIN, LOW);
   digitalWrite(RELAY_UNSET_PIN, LOW);
 
-  radioSetup(NODE_GATE);
+  // Serial FIRST so the radio init result below is actually visible.
   Serial.begin(115200);
+
+  radioSetup(NODE_GATE);
 
   rp2040.wdt_begin(WATCHDOG_TIMEOUT_MS);
 }
@@ -73,6 +75,18 @@ void loop() {
   // polling the radio over SPI. Worst-case command latency is ~2ms.
   delay(2);
 
+  // Fail-safe: no base poll for 6+ minutes means the base is dead or wedged —
+  // interrupt the car-sensor wire so the gate cannot auto-open unattended.
+  // The state check makes this pulse the coil ONCE per silence period
+  // (RELAY_UNKNOWN at boot counts as "not known off", so a base-less boot
+  // also ends in the safe, sensor-disconnected state after 6 minutes).
+  if (basePollExpired() && relayState != RELAY_OFF) {
+    applyRelay(false);
+    Serial.printf(
+        "[%lu] FAILSAFE: no base poll for 6+ min - car sensor disconnected\n",
+        millis());
+  }
+
   WindRadioPacket pkt;
   if (!receivePacket(pkt))
     return;
@@ -81,12 +95,14 @@ void loop() {
 
   switch (pkt.type) {
   case PKT_POLL_REQUEST:
+    if (pkt.fromNode == NODE_MAIN)
+      markBasePollSeen(); // liveness for the 6-minute fail-safe above
     replyStatus();
     break;
 
   case PKT_SET_RELAY:
     applyRelay(pkt.setRelay.relayOn);
-    // Protocol v5: no separate ACK packet. The freshly-pulsed relay state is
+    // Protocol v6: no separate ACK packet. The freshly-pulsed relay state is
     // the confirmation — reply with a status snapshot (retried).
     replyStatus();
     break;
