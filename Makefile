@@ -18,8 +18,11 @@ ifeq ($(PORT),)
 PORT := /dev/ttyACM0
 endif
 
-# All source files that should trigger a recompile when changed
-SOURCES := $(wildcard $(node)/*.ino $(node)/*.c $(node)/*.cpp $(node)/*.h $(node)/*.hpp common/*.c common/*.cpp common/*.h common/*.hpp)
+# All source files that should trigger a recompile when changed.
+# INCLUDES THE VENDORED RFM69 LIBRARY: without it, a patch to
+# lib/RFM69_LowPowerLab/* would leave the stamp current and `make flash`
+# would upload a stale binary (you would have needed force-compile).
+SOURCES := $(wildcard $(node)/*.ino $(node)/*.c $(node)/*.cpp $(node)/*.h $(node)/*.hpp common/*.c common/*.cpp common/*.h common/*.hpp lib/RFM69_LowPowerLab/*.c lib/RFM69_LowPowerLab/*.cpp lib/RFM69_LowPowerLab/*.h)
 
 .PHONY: all upload flash clean setup-deps monitor list size force-compile
 

@@ -9,6 +9,12 @@
 //   1 = errors and cycle summaries only
 //   2 = level 1 + per-attempt send/reply/result lines
 //   3 = level 2 + every listen-slice tick and radio state dumps
+//
+// !!! DEPLOYMENT: RLOG_LEVEL 3 is left in for bench debugging. It forces
+// extra SPI register reads plus a live RSSI measurement before EVERY
+// transaction — right before each send — which is exactly where the TX
+// faults used to occur. Set it to 1 (errors + cycle summaries) before
+// deploying a unit in the field.
 #define RADIO_DEBUG 1
 #define RLOG_LEVEL 3
 
@@ -62,17 +68,57 @@ static const char *packetTypeName(PacketType t) {
 // RTC holds UTC. Schedules and the UI show local Alberta time:
 // MST = UTC-7, MDT = UTC-6 (DST). DST runs from the second Sunday of March
 // 02:00 local to the first Sunday of November 02:00 local.
-// Returns true if `month/day` falls inside the MDT window.
-static bool albertaIsDst(uint8_t month, uint8_t day) {
+// Exact test: the pond node now sends the RTC weekday (0=Sunday), so the
+// transition DATES are pinned (second Sunday of March = the Sunday in
+// Mar 8-14; first Sunday of November = the Sunday in Nov 1-7). The
+// transition MOMENT is resolved from the packet's UTC hour/minute, because
+// the 02:00 local flip happens exactly on a UTC hour boundary:
+//   March: 02:00 MST == 09:00 UTC -> MDT from 09:00 UTC
+//   Nov:   02:00 MDT == 08:00 UTC -> MST from 08:00 UTC
+// (On the November transition day the local hour "1:00" occurs twice; both
+// map to distinct UTC hours, so the UTC-based test is unambiguous.)
+static bool albertaIsDst(uint8_t month, uint8_t day, uint8_t weekday,
+                         uint8_t utcHours) {
   if (month < 3 || month > 11)
     return false; // Jan, Feb, Dec -> MST
   if (month > 3 && month < 11)
     return true; // Apr..Oct -> MDT
-  // March / November: find the day-of-month of the relevant Sunday.
-  // Second Sunday of March is between the 8th and 14th; first Sunday of
-  // November is between the 1st and 7th. Without the weekday we approximate:
-  // treat Mar 8+ as DST, Nov 7- as standard — accurate within a few days.
-  return month == 3 ? day >= 8 : day < 7;
+
+  // Day-of-month of the most recent Sunday on or before (month, day); if
+  // there is no Sunday in the month yet, wrap to the first one (day 1..7).
+  int8_t sunday = (int8_t)day - (int8_t)weekday;
+  if (sunday < 1)
+    sunday += 7;
+
+  if (month == 3) {
+    // DST starts the SECOND Sunday (always day 8-14) at 02:00 MST ==
+    // 09:00 UTC.
+    if (sunday <= 7) {
+      // Most recent Sunday is the FIRST one; the second is 7 days later.
+      if (day < sunday + 7)
+        return false;
+      if (day > sunday + 7)
+        return true;
+      return utcHours >= 9; // today is the second Sunday
+    }
+    if (sunday > 14)
+      return true; // most recent Sunday is the 3rd+; second Sunday passed
+    // sunday in 8..14 IS the second Sunday.
+    if (day == sunday)
+      return utcHours >= 9;
+    return true; // today (Mon..Sat) is after the second Sunday
+  }
+
+  // November: DST ends the FIRST Sunday (always day 1-7) at 02:00 MDT ==
+  // 08:00 UTC. (On that day local "1:00" occurs twice, but both hours map
+  // to distinct UTC hours, so the UTC-hour test is unambiguous.)
+  if (sunday > 7)
+    return false; // most recent Sunday is the 2nd+; first Sunday passed
+  if (day < sunday)
+    return true; // before the first Sunday: still DST
+  if (day > sunday)
+    return false;
+  return utcHours < 8; // today is the first Sunday
 }
 
 // Convert UTC hour/minute (+ date for DST) to Alberta wall-clock time.
@@ -102,6 +148,7 @@ void RadioManager::init() {
 }
 
 void RadioManager::loop() {
+  radioCoreBeat(); // liveness stamp for the base watchdog (central_control.ino)
   // Run a full poll cycle every POLL_CYCLE_MS
   unsigned long now = millis();
   if (now - lastPollCycle >= POLL_CYCLE_MS) {
@@ -180,6 +227,10 @@ bool RadioManager::transact(uint8_t nodeId, const WindRadioPacket &request,
 #endif
 
   for (uint8_t attempt = 0; attempt < POLL_ATTEMPTS; attempt++) {
+    // This send + listen round can block ~1.5 s worst case (CSMA + bounded
+    // send + listen slice); stamp liveness so the base watchdog's other-core
+    // watcher doesn't see a false stall mid-cycle.
+    radioCoreBeat();
     RLOG("[%lu] -> node %u %s (attempt %u/%u, listen %lums)\n", millis(),
          nodeId, packetTypeName(request.type), attempt + 1,
          (unsigned)POLL_ATTEMPTS, listenSlice);
@@ -248,9 +299,13 @@ void RadioManager::pollPondNode() {
     // Convert UTC (as stored on the RTC) to Alberta local time for
     // everything downstream: UI display AND schedule evaluation. Schedules
     // are entered in local wall-clock time, so the conversion must happen
-    // here, once, before the values are cached.
+    // here, once, before the values are cached. The DST test uses the raw
+    // (still-UTC) packet values — including the RTC weekday and the UTC
+    // hour — and is exact, including on the two transition days.
     bool dst = albertaIsDst(responsePacket.pondStatus.month,
-                            responsePacket.pondStatus.day);
+                            responsePacket.pondStatus.day,
+                            responsePacket.pondStatus.weekday,
+                            responsePacket.pondStatus.hours);
     pondStatus.hours = responsePacket.pondStatus.hours;
     pondStatus.minutes = responsePacket.pondStatus.minutes;
     utcToAlberta(pondStatus.hours, pondStatus.minutes, dst);

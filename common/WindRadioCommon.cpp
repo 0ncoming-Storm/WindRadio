@@ -13,22 +13,54 @@ RFM69 radio(RFM69_CS, RFM69_INT, true);
 
 // --- Radio Initialization ---
 // Resets the RFM69 chip, initializes it on the configured frequency/network,
-// enables high-power mode, and sets the encryption key.
-void radioSetup(uint8_t myNodeId) {
+// enables high-power mode, and sets the encryption key. Shared by boot and
+// the runtime recovery path (radioHardReset below).
+static uint8_t myNodeIdG = 0; // node ID passed to radioSetup(); recovery re-inits with it
+
+static void doRadioSetup() {
   pinMode(RFM69_RST, OUTPUT);
-  digitalWrite(RFM69_RST, HIGH); // hold reset
+  digitalWrite(RFM69_RST, HIGH); // hold reset (board polarity: HIGH = reset)
   delay(10);
   digitalWrite(RFM69_RST, LOW); // release reset
   delay(10);
 
-  if (!radio.initialize(FREQUENCY, myNodeId, NETWORKID)) {
+  if (!radio.initialize(FREQUENCY, myNodeIdG, NETWORKID)) {
     Serial.println("Radio init failed!");
   } else {
     Serial.println("Radio init good");
   }
-  radio.setHighPower();      // enable PA boost for RFM69HW
-  radio.setPowerLevel(16);   // ~23/31 max power
+  radio.setHighPower(); // enable PA boost for RFM69HW
+  // HCW level 16 = PA1+PA2, roughly 12-15 dBm. NOTE: README recommends
+  // setPowerLevel(23) (~17-20 dBm, +HiPower) for the 100-140 m field links;
+  // this lower level is the bench setting. Decide one and keep them in sync.
+  radio.setPowerLevel(16);
   radio.encrypt(ENCRYPTKEY); // 16-byte AES key (password must match all nodes)
+}
+
+void radioSetup(uint8_t myNodeId) {
+  myNodeIdG = myNodeId;
+  doRadioSetup();
+}
+
+// --- TX Fault Tracking & Recovery ---
+// A wedged radio (stuck mode transition: opmode reads TX while ModeReady
+// never asserts) does NOT recover by itself. After the wedge the library's
+// internal mode bookkeeping still says STANDBY, so every later setMode()
+// call is a no-op — no new mode transition is ever issued, ModeReady never
+// re-asserts, and every send bails out of the bounded waits with lastTxOk
+// false, forever. The only reliable reset is the RST pin, so once the
+// consecutive fault count hits the threshold we pulse RST and re-run the
+// full initialization.
+#define TX_FAULT_RESET_THRESHOLD 5
+static uint8_t consecutiveTxFaults = 0;
+
+static void radioHardReset() {
+  Serial.printf(
+      "[%lu] radio: %u consecutive TX faults - hard reset (RST pulse + "
+      "re-init)\n",
+      millis(), (unsigned)TX_FAULT_RESET_THRESHOLD);
+  doRadioSetup();
+  consecutiveTxFaults = 0;
 }
 
 // --- Transmit (no hardware ACK) ---
@@ -55,11 +87,22 @@ bool sendPacket(uint8_t toNodeId, const WindRadioPacket &pkt) {
   // radio.lastTxOk was latched inside the PacketSent wait loop — the IRQ2
   // flag itself auto-clears on leaving TX mode, so it must not be polled
   // here. False means the send timed out; recover to RX and report failure.
-  if (radio.lastTxOk)
+  if (radio.lastTxOk) {
+    consecutiveTxFaults = 0;
     return true;
-  Serial.printf("[%lu] radio: TX fault sending to node %u (irq1=0x%02x)\n",
-                millis(), toNodeId, (unsigned)radio.readReg(0x27));
+  }
+
+  consecutiveTxFaults++;
+  Serial.printf(
+      "[%lu] radio: TX fault sending to node %u (irq1=0x%02x, faults=%u)\n",
+      millis(), toNodeId, (unsigned)radio.readReg(0x27),
+      (unsigned)consecutiveTxFaults);
   radio.setMode(RF69_MODE_RX); // resume listening despite the failed send
+
+  // A wedge does not self-heal (see radioHardReset docs): escalate to an RST
+  // reset + re-init once faults run consecutively.
+  if (consecutiveTxFaults >= TX_FAULT_RESET_THRESHOLD)
+    radioHardReset();
   return false;
 }
 
@@ -99,4 +142,14 @@ bool receivePacket(WindRadioPacket &outPkt) {
   outPkt.fromNode = radio.SENDERID; // stamp who actually sent it
 
   return true;
+}
+
+// --- Base-Liveness Fail-Safe (used by all receiver nodes) ---
+// 0 = "never seen a poll"; millis() subtraction wraps correctly.
+static unsigned long lastBasePollMs = 0;
+
+void markBasePollSeen() { lastBasePollMs = millis(); }
+
+bool basePollExpired() {
+  return (millis() - lastBasePollMs) >= BASE_POLL_TIMEOUT_MS;
 }
