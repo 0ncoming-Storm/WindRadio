@@ -148,6 +148,7 @@ void RadioManager::init() {
 }
 
 void RadioManager::loop() {
+  radioCoreBeat(); // liveness stamp for the base watchdog (central_control.ino)
   // Run a full poll cycle every POLL_CYCLE_MS
   unsigned long now = millis();
   if (now - lastPollCycle >= POLL_CYCLE_MS) {
@@ -226,6 +227,10 @@ bool RadioManager::transact(uint8_t nodeId, const WindRadioPacket &request,
 #endif
 
   for (uint8_t attempt = 0; attempt < POLL_ATTEMPTS; attempt++) {
+    // This send + listen round can block ~1.5 s worst case (CSMA + bounded
+    // send + listen slice); stamp liveness so the base watchdog's other-core
+    // watcher doesn't see a false stall mid-cycle.
+    radioCoreBeat();
     RLOG("[%lu] -> node %u %s (attempt %u/%u, listen %lums)\n", millis(),
          nodeId, packetTypeName(request.type), attempt + 1,
          (unsigned)POLL_ATTEMPTS, listenSlice);

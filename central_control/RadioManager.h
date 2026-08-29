@@ -56,3 +56,9 @@ private:
 // Single global instance (defined in central_control.ino), shared with the
 // UI layer so screens can display actual reported node status.
 extern RadioManager radioManager;
+
+// Liveness stamp for the radio core (Core 1) — defined in
+// central_control.ino, called from loop1() and from progress points inside
+// the poll cycles below so the other core's watchdog watcher sees beats
+// even while a poll cycle blocks for ~1.5 s per transact().
+void radioCoreBeat();

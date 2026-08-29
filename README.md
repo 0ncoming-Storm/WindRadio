@@ -117,6 +117,14 @@ on-device menu (buttons A/B/C; hold A+B to enter menu).
   later `setMode()`. The shared radio layer therefore counts consecutive TX
   faults and, after 5 in a row, pulses RST and re-initializes the radio
   (`common/WindRadioCommon.cpp`, see `radio-hang-research-brief.md`).
+- **Base-station watchdog:** the base (dual-core RP2040) arms one chip WDT
+  (20 s) and each core feeds it **only while the other core is still
+  beating** (10 s stall threshold, beat counters stamped from `loop()`/
+  `loop1()` and from RadioManager's poll-cycle progress points). An
+  unconditional kick from a healthy core would mask a hung one, so this
+  conditional feed is what makes a single WDT cover both cores; a hung core
+  is reset within ~30 s worst case. It is armed in `setup1()`, so the bench
+  `while (!Serial)` wait cannot reboot-loop a headless board.
 - The RFM69 constructor must NOT be given a pin number as 4th argument — it's
   an `SPIClass*`. Passing GPIO 21 there silently corrupted memory (past bug).
 - HCW modules draw ~130 mA TX spikes; bench powering from a laptop USB port

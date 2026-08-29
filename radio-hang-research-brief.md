@@ -102,12 +102,35 @@ pulses RST and re-runs the full `doRadioSetup()` (reset, initialize,
 high-power, power level, AES key). Boot and recovery share the same init
 path.
 
-### 5. Watchdogs on all receivers
+### 5. Watchdogs on all nodes
 `receiver-pond`, `receiver-latching`, `receiver-nonlatching`:
 `rp2040.wdt_begin(8000)`. A hung node resets itself; non-latching relays
 default OFF on reset (safe direction), the latching gate relay holds
 position through reset by design and is resolved by the 6-minute fail-safe
 below.
+
+The base station gets one too — it was the only node without a WDT, so a
+hung core there (UI core stuck in an I2C OLED transfer, radio core wedged
+in a loop, either core in a hardfault) would leave the network unattended
+forever. The RP2040 has a single chip watchdog, so both cores must share
+it with a twist: an unconditional `wdt_reset()` from a healthy core would
+always mask a hung one. Each core instead bumps a volatile beat counter
+every loop and only kicks the WDT while the *other* core's counter has
+changed within 10 s (`CoreStallWatcher` in `central_control.ino`). Core 1
+also stamps beats from RadioManager progress points
+(`radioCoreBeat()`: `loop()` top, each `transact()` attempt) because one
+transact() can block ~1.5 s worst case (CSMA + send + listen slice) —
+still ≪ the 10 s threshold. The 20 s WDT period then forces the reset:
+a hung core is recovered within ~30 s worst case. The WDT is armed in
+`setup1()` (after both cores are up), deliberately NOT in `setup()`, so
+the bench `while (!Serial)` wait in `setup()` cannot reboot-loop a
+headless board. Note for whoever bounds/removes that wait for field
+deployment (see its comment): with the watchdog in place, a WDT-triggered
+reboot lands back in a working system, which is exactly the property the
+wait currently lacks. Known coverage gap: a hang *during* `setup()`
+(e.g. OLED I2C never answers) happens before the WDT is armed, so it is
+not auto-recovered; the 6-minute node fail-safe still takes the relays
+OFF in that case — safety holds, recovery is just slower.
 
 ### 6. Application protocol v6 (no radio-level ACKs, ever)
 `common/WindRadioCommon.h` + `RadioManager::transact()`:
